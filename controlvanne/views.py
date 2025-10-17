@@ -1,0 +1,163 @@
+import json, re, time
+from django.http import JsonResponse, HttpResponseBadRequest, HttpResponseForbidden
+from django.shortcuts import render
+from django.views.decorators.csrf import csrf_exempt
+from django.conf import settings
+from django.utils import timezone
+from channels.layers import get_channel_layer
+from asgiref.sync import async_to_sync
+from .models import Card, RfidSession, TireuseBec
+from decimal import Decimal, ROUND_HALF_UP
+from django.db import transaction
+
+def _dec(x, d="0.00"):  # helper
+    try: return Decimal(str(x))
+    except: return Decimal(d)
+def index(request): return render(request, "controlvanne/index.html")
+
+def _check_key(request):
+    key = request.headers.get("X-API-Key") or request.GET.get("key")
+    want = getattr(settings, "AGENT_SHARED_KEY", None)
+    return (not want) or (key == want)
+def _norm_uid(uid: str) -> str: return re.sub(r"[^0-9A-Fa-f]","", uid or "").upper()
+
+@csrf_exempt
+def api_rfid_authorize(request):
+    if not _check_key(request): return HttpResponseForbidden("forbidden")
+    uid = request.GET.get("uid")
+    if not uid and request.body:
+        try: uid = json.loads(request.body).get("uid")
+        except Exception: pass
+    uid = _norm_uid(uid)
+    if not uid: return HttpResponseBadRequest("missing uid")
+#    from .models import Card
+
+    # lire la tireuse ciblée pour connaître la conversion
+    tb_slug = request.GET.get("tireuse_bec") or "default"
+    tb = TireuseBec.objects.filter(slug__iexact=tb_slug).first()
+
+
+    card = Card.objects.filter(uid__iexact=uid).first()
+    ok = bool(card and card.is_valid_now())
+
+    unit_ml = _dec(tb.unit_ml if tb else "100.00")
+    unit_label = tb.unit_label if tb else "patate"
+    balance = _dec(card.balance if card else "0.00")
+    allowed_ml = (balance * unit_ml) if ok else Decimal("0.00")
+    enough_funds = allowed_ml > 0
+
+    return JsonResponse({"authorized": ok, "uid": uid,
+                         "label": (card.label if card else None),
+                         "reason": (None if ok else ("Carte inconnue" if not card else "inactive"))
+                         "balance": str(balance),
+                         "unit_label": unit_label,
+                         "unit_ml": float(unit_ml),
+                         "allowed_ml": float(allowed_ml),  # quota alloué pour cette session
+                         "enough_funds": bool(enough_funds),
+                         })
+
+@csrf_exempt
+def api_rfid_event(request):
+# Recoit du Pi3 et diffuse en WS
+
+    if not _check_key(request): return HttpResponseForbidden("forbidden")
+    if request.method != "POST": return HttpResponseBadRequest("POST only")
+    try: data = json.loads(request.body or b"{}")
+    except Exception: return HttpResponseBadRequest("invalid json")
+
+    uid = _norm_uid(data.get("uid"))
+    present = bool(data.get("present", False))
+    authorized = bool(data.get("authorized", False))
+    vanne_ouverte = bool(data.get("vanne_ouverte", False))
+    volume_ml = float(data.get("volume_ml") or 0.0)
+    debit_l_min = float(data.get("debit_l_min") or 0.0)
+    message = data.get("message") or ""
+
+    # identification du distributeur
+    slug_in = (data.get("tireuse_bec") )
+    bec_slug = (slug_in or " defaut sluin").strip().lower()
+    label_hint = (data.get("liquid_label") or "").strip()
+    tireuse_bec, created = TireuseBec.objects.get_or_create(slug=bec_slug, defaults={
+        "liquid_label": (label_hint or "Liquide")
+    })
+    # si on reçoit un libellé et qu'il diffère, on peut mettre à jour
+    if label_hint and tireuse_bec.liquid_label != label_hint:
+        tireuse_bec.liquid_label = label_hint
+        tireuse_bec.save(update_fields=["liquid_label"])
+
+    # --- Gestion de session (1 session ouverte max) ---
+    open_s = RfidSession.objects.filter(tireuse_bec=tireuse_bec, ended_at__isnull=True).order_by("-started_at").first()
+
+    if present and uid:
+        # nouvelle carte OU première détection : (si open_s d'un autre uid, on le clôt)
+        if open_s and open_s.uid != uid:
+            open_s.close_with_volume(volume_ml)
+        # re-fetch après éventuelle clôture
+        open_s = RfidSession.objects.filter(ended_at__isnull=True).order_by("-started_at").first()
+
+        if not open_s:
+            card = Card.objects.filter(uid__iexact=uid).first()
+            unit_ml = tireuse_bec.unit_ml
+            unit_label = tireuse_bec.unit_label
+            balance = _dec(card.balance if card else "0.00")
+            allowed_ml = (balance * _dec(unit_ml)) if (card and card.is_valid_now()) else Decimal("0.00")
+            open_s = RfidSession.objects.create(
+                tireuse_bec=tireuse_bec,
+                liquid_label_snapshot=tireuse_bec.liquid_label,
+                uid=uid,
+                card=card,
+                label_snapshot=(card.label if card else ""),
+                unit_label_snapshot=unit_label,
+                unit_ml_snapshot=_dec(unit_ml),
+                allowed_ml_session=allowed_ml,
+                authorized=authorized,
+                started_at=timezone.now(),
+                volume_start_ml=volume_ml,
+                last_message=message,
+            )
+        else:
+            # mise à jour continue (volume, message, autorisation)
+            open_s.volume_end_ml = volume_ml
+            open_s.authorized = authorized
+            open_s.last_message = message
+            open_s.save(update_fields=["volume_end_ml","authorized","last_message"])
+
+    else:
+        # pas de carte présente -> clôturer la session ouverte s'il y en a une
+        if open_s:
+            open_s.last_message = message
+            open_s.close_with_volume(volume_ml)
+            # carte OK
+            if open_s.card_id:
+                with transaction.atomic():
+                    # verrouille la carte pour MAJ solde
+                    card = Card.objects.select_for_update().get(pk=open_s.card_id)
+                    unit_ml = _dec(open_s.unit_ml_snapshot or tireuse_bec.unit_ml or "100.00")
+                    consumed_ml = _dec(open_s.volume_delta_ml or 0)
+                    if consumed_ml > 0 and unit_ml > 0:
+                        units = (consumed_ml / unit_ml).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                        # plafonne à ce qu'il reste (sécurité)
+                        if card.balance < units: units = card.balance
+                        if units > 0:
+                            card.balance = (card.balance - units).quantize(Decimal("0.01"))
+                            card.save(update_fields=["balance"])
+                            open_s.charged_units = units
+                            open_s.save(update_fields=["charged_units"])
+
+    # push websocket
+    payload = {
+        "ts": time.time(),
+        "uid": _norm_uid(data.get("uid") or "") or None,
+        "balance":card.balance,
+        "tireuse_bec": tireuse_bec.slug,
+        "liquid_label": tireuse_bec.liquid_label,
+        "present": bool(data.get("present", False)),
+        "authorized": bool(data.get("authorized", False)),
+        "vanne_ouverte": bool(data.get("vanne_ouverte", False)),
+        "volume_ml": float(data.get("volume_ml") or 0.0),
+        "debit_l_min": float(data.get("debit_l_min") or 0.0),
+        "message": data.get("message") or "",
+    }
+    ch = get_channel_layer()
+    async_to_sync(ch.group_send)("rfid_state", {"type":"state.update","payload":payload})
+    return JsonResponse({"ok": True})

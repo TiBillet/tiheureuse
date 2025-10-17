@@ -1,0 +1,79 @@
+<!doctype html><html lang="fr"><head>
+<meta charset="utf-8"><title>Panneau vanne — WebSocket</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin:20px;max-width:720px}
+.card{border:1px solid #ddd;border-radius:12px;padding:16px;margin-bottom:16px}
+.badge{display:inline-block;padding:6px 10px;border-radius:999px;background:#eee}
+.badge.on{background:#d1f7c4}.badge.off{background:#ffd1d1}
+.stat{font-size:18px;margin:6px 0}.mono{font-family:ui-monospace,Consolas,monospace}#status{color:#666}
+</style></head><body>
+<h1>Panneau vanne — WebSocket</h1><p><a href="/admin/">Admin</a></p>
+<div class="card">
+  <div class="stat">Vanne: <span id="etat" class="badge off">Fermée</span></div>
+  <div>Carte présente: <b id="present">non</b></div>
+  <div>UID: <span id="uid" class="mono">—</span></div>
+  <div>Autorisation: <b id="auth">—</b></div>
+  <div>Débit: <b id="debit">0.00</b> L/min &nbsp; Volume: <b id="volume">0</b> mL</div>
+  <div id="msg" style="color:#555;margin-top:6px"></div>
+  <div id="status"></div>
+</div>
+<script>
+(function(){
+  const container = document.body; // ou un <div id="panels"></div>
+  const cards = new Map();
+  function getCard(slug, title){
+    if(cards.has(slug)) return cards.get(slug);
+    const el = document.createElement('div');
+    el.className = 'card';
+    el.innerHTML = `
+      <h2 style="margin-top:0">${title} <small style="color:#777">(${slug})</small></h2>
+      <div class="stat">Vanne: <span class="badge off" data-role="etat">Fermée</span></div>
+      <div>Carte présente: <b data-role="present">non</b></div>
+      <div>UID: <span class="mono" data-role="uid">—</span></div>
+      <div>Autorisation: <b data-role="auth">—</b></div>
+      <div>Débit: <b data-role="debit">0.00</b> L/min &nbsp; Volume: <b data-role="volume">0</b> mL</div>
+      <div data-role="msg" style="color:#555;margin-top:6px"></div>
+    `;
+    container.appendChild(el);
+    const refs = {
+      root: el,
+      etat: el.querySelector('[data-role="etat"]'),
+      present: el.querySelector('[data-role="present"]'),
+      uid: el.querySelector('[data-role="uid"]'),
+      auth: el.querySelector('[data-role="auth"]'),
+      debit: el.querySelector('[data-role="debit"]'),
+      volume: el.querySelector('[data-role="volume"]'),
+      msg: el.querySelector('[data-role="msg"]'),
+      titleEl: el.querySelector('h2'),
+    };
+    cards.set(slug, refs);
+    return refs;
+  }
+
+  const proto = (location.protocol === 'https:') ? 'wss' : 'ws';
+  const wsUrl = proto + '://' + location.host + '/ws/panel/';
+  let ws;
+  function connect(){
+    ws = new WebSocket(wsUrl);
+    ws.onmessage = (e) => {
+      const j = JSON.parse(e.data);
+      const slug = j.tireuse_bec || 'default';
+      const title = j.liquid_label || 'Liquide';
+      const c = getCard(slug, title);
+      c.titleEl.firstChild.textContent = title + ' ';
+      c.etat.textContent = j.vanne_ouverte ? 'Ouverte' : 'Fermée';
+      c.etat.className = 'badge ' + (j.vanne_ouverte ? 'on' : 'off');
+      c.present.textContent = j.present ? 'oui' : 'non';
+      c.uid.textContent = j.uid || '—';
+      c.auth.textContent = j.authorized ? 'autorisée' : 'refusée';
+      c.debit.textContent = (j.debit_l_min||0).toFixed(2);
+      c.volume.textContent = Math.round(j.volume_ml||0);
+      c.msg.textContent = j.message || '';
+    };
+    ws.onclose = ()=> setTimeout(connect, 1000);
+  }
+  connect();
+})();
+</script>
+</body></html>
