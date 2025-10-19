@@ -48,7 +48,7 @@ def api_rfid_authorize(request):
 
     return JsonResponse({"authorized": ok, "uid": uid,
                          "label": (card.label if card else None),
-                         "reason": (None if ok else ("Carte inconnue" if not card else "inactive"))
+                         "reason": (None if ok else ("Carte inconnue" if not card else "inactive")),
                          "balance": str(balance),
                          "unit_label": unit_label,
                          "unit_ml": float(unit_ml),
@@ -73,6 +73,8 @@ def api_rfid_event(request):
     debit_l_min = float(data.get("debit_l_min") or 0.0)
     message = data.get("message") or ""
 
+    card_obj = None
+
     # identification du distributeur
     slug_in = (data.get("tireuse_bec") )
     bec_slug = (slug_in or " defaut sluin").strip().lower()
@@ -92,8 +94,9 @@ def api_rfid_event(request):
         # nouvelle carte OU première détection : (si open_s d'un autre uid, on le clôt)
         if open_s and open_s.uid != uid:
             open_s.close_with_volume(volume_ml)
+            open_s= None
         # re-fetch après éventuelle clôture
-        open_s = RfidSession.objects.filter(ended_at__isnull=True).order_by("-started_at").first()
+        #open_s = RfidSession.objects.filter(ended_at__isnull=True).order_by("-started_at").first()
 
         if not open_s:
             card = Card.objects.filter(uid__iexact=uid).first()
@@ -105,7 +108,7 @@ def api_rfid_event(request):
                 tireuse_bec=tireuse_bec,
                 liquid_label_snapshot=tireuse_bec.liquid_label,
                 uid=uid,
-                card=card,
+                card=card_obj,
                 label_snapshot=(card.label if card else ""),
                 unit_label_snapshot=unit_label,
                 unit_ml_snapshot=_dec(unit_ml),
@@ -117,6 +120,7 @@ def api_rfid_event(request):
             )
         else:
             # mise à jour continue (volume, message, autorisation)
+            card_obj = open_s.card
             open_s.volume_end_ml = volume_ml
             open_s.authorized = authorized
             open_s.last_message = message
@@ -127,6 +131,7 @@ def api_rfid_event(request):
         if open_s:
             open_s.last_message = message
             open_s.close_with_volume(volume_ml)
+            card_obj = open_s.card
             # carte OK
             if open_s.card_id:
                 with transaction.atomic():
@@ -143,12 +148,16 @@ def api_rfid_event(request):
                             card.save(update_fields=["balance"])
                             open_s.charged_units = units
                             open_s.save(update_fields=["charged_units"])
+# --- construit le payload SANS risquer UnboundLocalError
+    balance_val = None
+    if card_obj is not None and hasattr(card_obj, "balance"):
+        balance_val = str(card_obj.balance)  # str pour éviter les soucis Decimal JSON
 
     # push websocket
     payload = {
         "ts": time.time(),
         "uid": _norm_uid(data.get("uid") or "") or None,
-        "balance":card.balance,
+#        "balance":card.balance,
         "tireuse_bec": tireuse_bec.slug,
         "liquid_label": tireuse_bec.liquid_label,
         "present": bool(data.get("present", False)),
@@ -157,6 +166,7 @@ def api_rfid_event(request):
         "volume_ml": float(data.get("volume_ml") or 0.0),
         "debit_l_min": float(data.get("debit_l_min") or 0.0),
         "message": data.get("message") or "",
+        "balance": balance_val,
     }
     ch = get_channel_layer()
     async_to_sync(ch.group_send)("rfid_state", {"type":"state.update","payload":payload})

@@ -8,9 +8,11 @@ from gpiozero import OutputDevice, Button
 from threading import Lock
 import RPi.GPIO as GPIO
 
+#from tibeerV11 import TIREUSE_BEC_ID
+
 # ========= CONFIG =========
 PIN_VANNE = 18        # sortie vers MOSFET/relais (LED en test)
-PIN_DEBIT = 23        # ( debimetre)
+PIN_DEBIT = 23        # ( Entree debimetre)
 FACTEUR_CALIBRATION = 10.0 # defaut 450.0-- 100.0 pour interrupteur 1 appui=10ml
 BOUNCE_MS = 50 # defaut 2 --50 a 80 pour interrupteur
 LISSAGE_SECONDES = 1.0
@@ -18,8 +20,9 @@ TIMEOUT_SEC = 120
 DJANGO_BASE_URL = os.environ.get("DJANGO_BASE_URL", "http://192.168.1.10:8000")
 DJANGO_EVENT_URL = os.environ.get("DJANGO_EVENT_URL", f"{DJANGO_BASE_URL}/api/rfid/event")
 
-TIREUSE_BEC_ID = 'Soft1'
-LIQUID_LABEL = 'Limonade'
+TIREUSE_BEC_ID = os.environ.get("TIREUSE_BEC_ID",'Soft1')
+LIQUID_LABEL = os.environ.get("LIQUIDE_LABEL", 'Limonade')
+AGENT_SHARED_KEY = os.environ.get("AGENT_SHARED_KEY", "changeme")
 
 def push_event(payload: dict):
     base = {
@@ -43,17 +46,10 @@ RFID_ENABLE = True
 RFID_PRESENCE_GRACE_MS = 300      # tolérance entre lectures avant de considérer la carte "partie"
 RFID_MIN_OPEN_MS = 150            # anti-clignotement: garde ouvert min 150ms
 RFID_AUTH_CACHE_SEC = 2.0         # cache résultat d'auth pour limiter les appels à Django
-AGENT_SHARED_KEY = os.environ.get("AGENT_SHARED_KEY", "changeme")
+
 
 HOST="0.0.0.0"; PORT=5000
 # ==========================
-
-
-# ---- Helpers GPIO ----
-#GPIO.setmode(GPIO.BCM)
-#GPIO.setup(PIN_VANNE, GPIO.OUT, initial=GPIO.LOW)
-#GPIO.setup(PIN_DEBIT, GPIO.IN, pull_up_down=GPIO.PUD_UP)
-
 
 # ---- Vanne ----
 class Vanne:
@@ -324,40 +320,51 @@ def is_authorized(uid_hex: str) -> bool:
     now = time.monotonic()
     ent = _auth_cache.get(uid_hex)
     if ent and ent[0] > now:
-        return ent[1]
+        _, cached_ok, cached_allowed = ent
+        return (cached_ok and cached_allowed > 0.0), cached_allowed
     try:
         r = requests.get(
             f"{DJANGO_BASE_URL}/api/rfid/authorize",
-            params={"uid": uid_hex},
+            params={"uid": uid_hex, "tireuse_bec": TIREUSE_BEC_ID},
             headers={"X-API-Key": AGENT_SHARED_KEY},
-            timeout=2.0
+            timeout=2.0,
         )
-#        ok = r.json().get("authorized", False) if r.ok else False
-#    except Exception:
-#        ok = False
-#    _auth_cache[uid_hex] = (now + RFID_AUTH_CACHE_SEC, ok)
-#    return ok
+
 ## log de UID et reponse
-        ok = r.ok and bool(r.json().get("authorized", False))
-        reason = (r.json().get("reason") if r.ok else r.status_code)
-        print(f"[AUTH] uid={uid_hex} -> authorized={ok} reason={reason} tireuse={TIREUSE_BEC_ID}")
+#        ok = r.ok and bool(r.json().get("authorized", False))
+#        reason = (r.json().get("reason") if r.ok else r.status_code)
+#        print(f"[AUTH] uid={uid_hex} -> authorized={ok} reason={reason} tireuse={TIREUSE_BEC_ID}")
+        if not r.ok:
+            print(f"[AUTH] HTTP {r.status_code} pour uid={uid_hex}")
+            ok = False
+            allowed_ml = 0.0
+        else:
+            j = r.json()
+            ok = bool(j.get("authorized", False))
+        # allowed_ml = balance * unit_ml côté serveur (peut être 0)
+            allowed_ml = float(j.get("allowed_ml") or 0.0)
+            enough = bool(j.get("enough_funds", allowed_ml > 0.0))
+            print(
+                f"[AUTH] uid={uid_hex} -> authorized={ok} "
+                f"allowed_ml={allowed_ml:.1f} {j.get('unit_label', '') or ''}"
+            )
+            ok = ok and enough  # on exige aussi des fonds suffisant
+
     except Exception as e:
         print(f"[AUTH] uid={uid_hex} ERROR {e}")
         ok = False
-    _auth_cache[uid_hex] = (now + RFID_AUTH_CACHE_SEC, ok)
-    return ok
-
-
-
+        allowed_ml = 0.0
+    _auth_cache[uid_hex] = (now + RFID_AUTH_CACHE_SEC, ok, allowed_ml)
+    return ok and allowed_ml > 0.0, allowed_ml
 
 # ---- RFID loop: ouvre tant que carte autorisee presente ----
-#_rf_lock = threading.Lock()
-#_last_uid = None
-#_last_seen_ts = 0.0
 last_seen_ts = 0.0
 _message = ""
 authorized_current = False
 current_uid = None
+session_allowed_ml = 0.0
+session_base_ml = 0.0
+
 
 def _short(uid_hex: str, keep=8):
     # pour logs/UI: garde les 8 premiers hex 
@@ -380,12 +387,26 @@ def rfid_loop():
             if current_uid is None or uid_hex != current_uid:
                 current_uid = uid_hex
                 last_seen_ts = now
-                authorized_current = is_authorized(uid_hex)
+                authorized_current, session_allowed_ml = is_authorized(uid_hex)
 
-                if authorized_current:
+#                if authorized_current:
+#                    if not vanne.est_ouverte():
+#                       vanne.ouvrir()
+#                    _message = f"Carte {uid_hex[:8]}… autorisée (maintenir la carte)"
+#                else:
+#                    _message = f"Carte {uid_hex[:8]}… NON autorisée"
+#                    if vanne.est_ouverte():
+#                        vanne.fermer()
+
+                if authorized_current and session_allowed_ml > 0.0:
+                    session_base_ml = compteur.volume_l() * 1000.0
                     if not vanne.est_ouverte():
                         vanne.ouvrir()
-                    _message = f"Carte {uid_hex[:8]}… autorisée (maintenir la carte)"
+                    _message = f"Carte {uid_hex[:8]}… OK — quota {session_allowed_ml:.0f} ml"
+                elif authorized_current and session_allowed_ml <= 0.0:
+                    _message = f"Solde insuffisant ({uid_hex[:8]}…)"
+                    if vanne.est_ouverte():
+                        vanne.fermer()
                 else:
                     _message = f"Carte {uid_hex[:8]}… NON autorisée"
                     if vanne.est_ouverte():
@@ -397,7 +418,6 @@ def rfid_loop():
                     "present": True,
                     "authorized": authorized_current,
                     "vanne_ouverte": vanne.est_ouverte(),
-                    # optionnel:
                     "volume_ml": compteur.volume_l()*1000.0,
                     "debit_l_min": compteur.debit_l_min(),
                     "message": _message,
@@ -405,7 +425,16 @@ def rfid_loop():
             else:
                 # même carte toujours présente
                 last_seen_ts = now
-
+                if vanne.est_ouverte() and session_allowed_ml > 0.0:
+                    cur_ml = compteur.volume_l() * 1000.0
+                    if (cur_ml - session_base_ml) >= (session_allowed_ml - 0.5):  # petite marge anti-jitter
+                        vanne.fermer()
+                        _message = "Solde épuisé — vanne fermée"
+                        push_event({
+                            "uid": current_uid, "present": True, "authorized": authorized_current,
+                            "vanne_ouverte": False, "volume_ml": cur_ml,
+                            "debit_l_min": compteur.debit_l_min(), "message": _message,
+                        })
         else:
             # Carte retirée (après délai de grâce)
             if current_uid is not None and (now - last_seen_ts)*1000 > RFID_PRESENCE_GRACE_MS:
