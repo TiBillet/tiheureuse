@@ -1,0 +1,34 @@
+# sur le Pi /etc/systemd/system/kiosk.service
+[Unit]
+Description=Chromium Kiosk
+After=systemd-user-sessions.service network-online.target getty@tty1.service
+#After=network-online.target systemd-user-sessions.service
+Wants=network-online.target
+
+#evite le conflit avec le login sur tty1 pendant qu'X l'utilise
+Conflicts=getty@tty1.service
+
+[Service]
+User=sysop
+WorkingDirectory=/home/sysop
+
+# Attache le service à la console
+StandardInput=tty
+TTYReset=yes
+TTYVHangup=yes
+
+Environment=DISPLAY=:0
+Environment=XAUTHORITY=/home/sysop/.Xauthority
+PAMName=login
+TTYPath=/dev/tty1
+
+# lance le serveur X puis xinit (qui lit ~/.xinitrc)
+#ExecStart=/bin/bash -lc 'startx -- -nocursor'
+ExecStart=/usr/bin/xinit /home/sysop/.xinitrc -- /usr/lib/xorg/Xorg :0 -nolisten tcp vt1 -keeptty
+Restart=always
+RestartSec=5
+StandardOutput=syslog
+StandardError=syslog
+
+[Install]
+WantedBy=multi-user.target
