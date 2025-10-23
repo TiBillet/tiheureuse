@@ -20,7 +20,12 @@ body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin
 </div>
 <script>
 (function(){
-  const container = document.body; // ou un <div id="panels"></div>
+  const params = new URLSearchParams(location.search);
+  const only = (params.get('tireuse_bec') || '').trim().toLowerCase();
+
+  const proto = (location.protocol === 'https:') ? 'wss' : 'ws';
+//  const wsUrl = proto + '://' + location.host + '/ws/panel/' + (only ? ('?tireuse_bec=' + encodeURIComponent(only)) : '');
+  const wsUrl = proto + '://' + location.host + '/ws/panel/' + (location.search || '');
   const cards = new Map();
   function getCard(slug, title){
     if(cards.has(slug)) return cards.get(slug);
@@ -35,7 +40,7 @@ body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin
       <div>Débit: <b data-role="debit">0.00</b> L/min &nbsp; Volume: <b data-role="volume">0</b> mL</div>
       <div data-role="msg" style="color:#555;margin-top:6px"></div>
     `;
-    container.appendChild(el);
+    document.body.appendChild(el);
     const refs = {
       root: el,
       etat: el.querySelector('[data-role="etat"]'),
@@ -51,14 +56,12 @@ body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin
     return refs;
   }
 
-  const proto = (location.protocol === 'https:') ? 'wss' : 'ws';
-  const wsUrl = proto + '://' + location.host + '/ws/panel/';
   let ws;
   function connect(){
     ws = new WebSocket(wsUrl);
     ws.onmessage = (e) => {
       const j = JSON.parse(e.data);
-      const slug = j.tireuse_bec || 'default';
+      const slug = (j.tireuse_bec || 'default').toLowerCase();
       const title = j.liquid_label || 'Liquide';
       const c = getCard(slug, title);
       c.titleEl.firstChild.textContent = title + ' ';
@@ -76,4 +79,5 @@ body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin
   connect();
 })();
 </script>
+
 </body></html>

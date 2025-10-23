@@ -21,6 +21,10 @@ def _check_key(request):
     return (not want) or (key == want)
 def _norm_uid(uid: str) -> str: return re.sub(r"[^0-9A-Fa-f]","", uid or "").upper()
 
+SAFE = re.compile(r"[^A-Za-z0-9._-]")
+def _safe(slug: str) -> str:
+    return SAFE.sub("", (slug or "").strip().lower())[:80] or "all"
+
 @csrf_exempt
 def api_rfid_authorize(request):
     if not _check_key(request): return HttpResponseForbidden("forbidden")
@@ -77,12 +81,13 @@ def api_rfid_event(request):
 
     # identification du distributeur
     slug_in = (data.get("tireuse_bec") )
-    bec_slug = (slug_in or " defaut sluin").strip().lower()
+    bec_slug = (slug_in or "defaut").strip().lower()
     label_hint = (data.get("liquid_label") or "").strip()
+
     tireuse_bec, created = TireuseBec.objects.get_or_create(slug=bec_slug, defaults={
         "liquid_label": (label_hint or "Liquide")
     })
-    # si on reçoit un libellé et qu'il diffère, on peut mettre à jour
+  # si on reçoit un libellé et qu'il diffère, on peut mettre à jour
     if label_hint and tireuse_bec.liquid_label != label_hint:
         tireuse_bec.liquid_label = label_hint
         tireuse_bec.save(update_fields=["liquid_label"])
@@ -99,17 +104,17 @@ def api_rfid_event(request):
         #open_s = RfidSession.objects.filter(ended_at__isnull=True).order_by("-started_at").first()
 
         if not open_s:
-            card = Card.objects.filter(uid__iexact=uid).first()
+            card_obj = Card.objects.filter(uid__iexact=uid).first()
             unit_ml = tireuse_bec.unit_ml
             unit_label = tireuse_bec.unit_label
-            balance = _dec(card.balance if card else "0.00")
-            allowed_ml = (balance * _dec(unit_ml)) if (card and card.is_valid_now()) else Decimal("0.00")
+            balance = _dec(card_obj.balance if card_obj else "0.00")
+            allowed_ml = (balance * _dec(unit_ml)) if (card_obj and card_obj.is_valid_now()) else Decimal("0.00")
             open_s = RfidSession.objects.create(
                 tireuse_bec=tireuse_bec,
                 liquid_label_snapshot=tireuse_bec.liquid_label,
                 uid=uid,
                 card=card_obj,
-                label_snapshot=(card.label if card else ""),
+                label_snapshot=(card_obj.label if card_obj else ""),
                 unit_label_snapshot=unit_label,
                 unit_ml_snapshot=_dec(unit_ml),
                 allowed_ml_session=allowed_ml,
@@ -156,18 +161,32 @@ def api_rfid_event(request):
     # push websocket
     payload = {
         "ts": time.time(),
-        "uid": _norm_uid(data.get("uid") or "") or None,
-#        "balance":card.balance,
+        "uid": uid or None,
         "tireuse_bec": tireuse_bec.slug,
         "liquid_label": tireuse_bec.liquid_label,
-        "present": bool(data.get("present", False)),
-        "authorized": bool(data.get("authorized", False)),
-        "vanne_ouverte": bool(data.get("vanne_ouverte", False)),
-        "volume_ml": float(data.get("volume_ml") or 0.0),
-        "debit_l_min": float(data.get("debit_l_min") or 0.0),
-        "message": data.get("message") or "",
+        "present": present,
+        "authorized": authorized,
+        "vanne_ouverte": vanne_ouverte,
+        "volume_ml": volume_ml,
+        "debit_l_min": debit_l_min,
+        "message": message,
         "balance": balance_val,
+
     }
+
     ch = get_channel_layer()
-    async_to_sync(ch.group_send)("rfid_state", {"type":"state.update","payload":payload})
+    slug_safe = _safe(tireuse_bec.slug)
+#    async_to_sync(ch.group_send)("rfid_state", {"type":"state.update","payload":payload})
+# 1) Groupe global (pour une page "supervision" qui voit tout)
+    async_to_sync(ch.group_send)(
+        "rfid_state.all",
+        {"type": "state.update", "payload": payload}
+    )
+
+# 2) Groupe ciblé (slug de la tireuse courante)
+    async_to_sync(ch.group_send)(
+        f"rfid_state.{slug_safe}",
+        {"type": "state.update", "payload": payload}
+    )
+
     return JsonResponse({"ok": True})

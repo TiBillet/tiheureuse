@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+
 import os, time, threading, atexit, requests, re
 from functools import wraps
 from flask import Flask, request, jsonify
 from gpiozero import OutputDevice, Button
 from threading import Lock
+import RPi.GPIO as GPIO
+
 
 # ========= CONFIG =========
 PIN_VANNE = 18        # sortie vers MOSFET/relais (LED en test)
@@ -13,11 +16,22 @@ FACTEUR_CALIBRATION = 10.0 # defaut 450.0-- 100.0 pour interrupteur 1 appui=10ml
 BOUNCE_MS = 50 # defaut 2 --50 a 80 pour interrupteur
 LISSAGE_SECONDES = 1.0
 TIMEOUT_SEC = 120
+
+## inutile
+#def _clean_base(url: str) -> str:
+#    # enlève toute query et le slash final
+#    return (url or "").split("?", 1)[0].rstrip("/")
+##
+#DJANGO_BASE_URL = _clean_base(os.environ.get("DJANGO_BASE_URL", "http://192.168.1.10:8000"))
 DJANGO_BASE_URL = os.environ.get("DJANGO_BASE_URL", "http://192.168.1.10:8000")
-DJANGO_EVENT_URL = os.environ.get("DJANGO_EVENT_URL", f"{DJANGO_BASE_URL}/api/rfid/event")
+DJANGO_AUTH_URL = f"{DJANGO_BASE_URL}/api/rfid/authorize"
+DJANGO_EVENT_URL = f"{DJANGO_BASE_URL}/api/rfid/event"
+
+#DJANGO_BASE_URL = os.environ.get("DJANGO_BASE_URL", "http://192.168.1.10:8000")
+#DJANGO_EVENT_URL = os.environ.get("DJANGO_EVENT_URL", f"{DJANGO_BASE_URL}/api/rfid/event")
 
 TIREUSE_BEC_ID = os.environ.get("TIREUSE_BEC_ID",'Soft1')
-LIQUID_LABEL = os.environ.get("LIQUIDE_LABEL", 'Limonade')
+LIQUID_LABEL = os.environ.get("LIQUID_LABEL", 'Limo')
 AGENT_SHARED_KEY = os.environ.get("AGENT_SHARED_KEY", "changeme")
 
 def push_event(payload: dict):
@@ -43,8 +57,18 @@ RFID_PRESENCE_GRACE_MS = 300      # tolérance entre lectures avant de considér
 RFID_MIN_OPEN_MS = 150            # anti-clignotement: garde ouvert min 150ms
 RFID_AUTH_CACHE_SEC = 2.0         # cache résultat d'auth pour limiter les appels à Django
 
+
 HOST="0.0.0.0"; PORT=5000
 # ==========================
+
+
+# ---- Helpers GPIO ----
+#GPIO.setmode(GPIO.BCM)
+#GPIO.setup(PIN_VANNE, GPIO.OUT, initial=GPIO.LOW)
+#GPIO.setup(PIN_DEBIT, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+print("[AUTH URL]", DJANGO_BASE_URL)
+print("[EVENT URL]", DJANGO_EVENT_URL)
+
 
 # ---- Vanne ----
 class Vanne:
@@ -319,7 +343,7 @@ def is_authorized(uid_hex: str) -> bool:
         return (cached_ok and cached_allowed > 0.0), cached_allowed
     try:
         r = requests.get(
-            f"{DJANGO_BASE_URL}/api/rfid/authorize",
+            DJANGO_AUTH_URL,
             params={"uid": uid_hex, "tireuse_bec": TIREUSE_BEC_ID},
             headers={"X-API-Key": AGENT_SHARED_KEY},
             timeout=2.0,

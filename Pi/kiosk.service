@@ -1,4 +1,3 @@
-# sur le Pi /etc/systemd/system/kiosk.service
 [Unit]
 Description=Chromium Kiosk
 After=systemd-user-sessions.service network-online.target getty@tty1.service
@@ -11,7 +10,7 @@ Conflicts=getty@tty1.service
 [Service]
 User=sysop
 WorkingDirectory=/home/sysop
-
+EnvironmentFile=/etc/default/tibeer.env
 # Attache le service à la console
 StandardInput=tty
 TTYReset=yes
