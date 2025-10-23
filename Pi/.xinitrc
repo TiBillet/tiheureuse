@@ -12,7 +12,7 @@ xrandr --output "$OUTPUT" --rotate inverted || {
 
 
 openbox-session & sleep 1
-URL="http://192.168.1.10:8000/" 
+URL="http://192.168.1.10:8000/?tireuse_bec=chipek2" 
 exec chromium-browser \
   --no-first-run --no-default-browser-check \
   --disable-translate --disable-session-crashed-bubble \
