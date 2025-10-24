@@ -85,12 +85,8 @@ def api_rfid_event(request):
     label_hint = (data.get("liquid_label") or "").strip()
 
     tireuse_bec, created = TireuseBec.objects.get_or_create(slug=bec_slug, defaults={
-        "liquid_label": (label_hint or "Liquide")
-    })
-  # si on reçoit un libellé et qu'il diffère, on peut mettre à jour
-    if label_hint and tireuse_bec.liquid_label != label_hint:
-        tireuse_bec.liquid_label = label_hint
-        tireuse_bec.save(update_fields=["liquid_label"])
+        "liquid_label": "Liquide"})
+
 
     # --- Gestion de session (1 session ouverte max) ---
     open_s = RfidSession.objects.filter(tireuse_bec=tireuse_bec, ended_at__isnull=True).order_by("-started_at").first()

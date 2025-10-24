@@ -27,6 +27,10 @@ class TireuseBec(models.Model):
                                   help_text="Nom de l'unité de solde (ex: patate)")
     unit_ml = models.DecimalField(max_digits=8, decimal_places=2, default=Decimal("100.00"),
                                   help_text="Millilitres par unité (ex: 100.00 ml = 10 cL)")
+    agent_base_url = models.CharField(
+        max_length=200, blank=True, default="http://192.168.1.56:5000",
+        help_text="URL de l'agent Flask sur le Pi (ex: http://pi:5000)"
+    )
     def __str__(self):
         return self.slug
 

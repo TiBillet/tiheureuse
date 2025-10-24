@@ -1,14 +1,78 @@
-from django.contrib import admin
 from .models import Card, RfidSession, TireuseBec
+from .forms import TireuseBecForm
+from channels.layers import get_channel_layer
+from asgiref.sync import async_to_sync
 from django.http import HttpResponse
-import csv
+from django.contrib import admin, messages
+from django.conf import settings
+import csv, re
+import requests
+
+AGENT_KEY = getattr(settings, "AGENT_SHARED_KEY", "changeme")
+
+SAFE = re.compile(r"[^A-Za-z0-9._-]")
+def _safe(slug: str) -> str:
+    return (SAFE.sub("", (slug or "").strip().lower())[:80]) or "all"
 
 @admin.register(TireuseBec)
 class TireuseBecAdmin(admin.ModelAdmin):
-    list_display=("slug","liquid_label","unit_label","unit_ml","enabled","notes")
-    list_editable = ("liquid_label","enabled","notes")
-    search_fields = ("slug","liquid_label")
+#    list_display=("slug","liquid_label","unit_label","unit_ml","enabled","notes")
+#    list_editable = ("liquid_label","enabled","notes")
+#    search_fields = ("slug","liquid_label")
+    form = TireuseBecForm
+    list_display = ("slug", "agent_base_url", "liquid_label", "unit_label", "unit_ml", "enabled", "notes")
+    list_editable = ("liquid_label", "agent_base_url", "unit_label", "unit_ml", "enabled")
+    search_fields = ("slug", "liquid_label", "notes")
+    list_filter = ("enabled",)
+    ordering = ("slug",)
+    fieldsets = (
+        (None, {"fields": ("slug", "liquid_label")}),
+        ("Unité / Conversion", {"fields": ("unit_label", "unit_ml")}),
+        ("Autres", {"fields": ("enabled", "notes")}),
+    )
+    actions = ["push_kiosk_url",
+    "push_refresh",
+    ]
+    def push_kiosk_url(self, request, queryset):
+        ok, ko = 0, 0
+        for tb in queryset:
+            try:
+            # construit l’URL cible sur ce Pi
+                target = f"{request.scheme}://{request.get_host()}/?tireuse_bec={tb.slug}"
+                endpoint = (tb.agent_base_url or "").rstrip("/") + "/agent/kiosk/set_url"
+                r = requests.post(
+                    endpoint,
+                    json={"url": target},
+                    headers={"X-API-Key": AGENT_KEY},
+                    timeout=3.0
+                )
+                if r.ok and r.json().get("ok"):
+                    ok += 1
+                else:
+                    ko += 1
+            except Exception:
+                ko += 1
+        if ok:
+            self.message_user(request, f"KIOSK_URL mis à jour et kiosque relancé pour {ok} bec(s).", level=messages.SUCCESS)
+        if ko:
+            self.message_user(request, f"Échec sur {ko} bec(s). Vérifie agent_base_url et la clé API.",
+                              level=messages.ERROR)
+    push_kiosk_url.short_description = "Mettre à jour l'URL du kiosque et redémarrer"
 
+
+    def push_refresh(self, request, queryset):
+    # pousse un snapshot vers les panneaux abonnés
+        from .signals import snapshot_for_bec
+        ch = get_channel_layer()
+        n = 0
+        for tb in queryset:
+            payload = snapshot_for_bec(tb)
+            async_to_sync(ch.group_send)(f"rfid_state.{_safe(tb.slug)}",
+                                     {"type": "state.update", "payload": payload})
+            n += 1
+        self.message_user(request, f"Snapshot poussé à {n} tireuse(s).")
+
+    push_refresh.short_description = "Pousser une mise à jour au panneau"
 
 @admin.register(Card)
 class CardAdmin(admin.ModelAdmin):

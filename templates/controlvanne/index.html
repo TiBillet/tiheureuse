@@ -9,7 +9,7 @@ body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin
 .stat{font-size:18px;margin:6px 0}.mono{font-family:ui-monospace,Consolas,monospace}#status{color:#666}
 </style></head><body>
 <h1>Panneau vanne — WebSocket</h1><p><a href="/admin/">Admin</a></p>
-<div class="card">
+{% comment %}<div class="card">
   <div class="stat">Vanne: <span id="etat" class="badge off">Fermée</span></div>
   <div>Carte présente: <b id="present">non</b></div>
   <div>UID: <span id="uid" class="mono">—</span></div>
@@ -17,32 +17,39 @@ body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin
   <div>Débit: <b id="debit">0.00</b> L/min &nbsp; Volume: <b id="volume">0</b> mL</div>
   <div id="msg" style="color:#555;margin-top:6px"></div>
   <div id="status"></div>
-</div>
+</div>{% endcomment %}
 <script>
-(function(){
+(function () {
+  // slug cible (exigé pour un kiosque par bec)
   const params = new URLSearchParams(location.search);
-  const only = (params.get('tireuse_bec') || '').trim().toLowerCase();
+  let onlySlug = (params.get('tireuse_bec') || '').trim().toLowerCase();
 
-  const proto = (location.protocol === 'https:') ? 'wss' : 'ws';
-//  const wsUrl = proto + '://' + location.host + '/ws/panel/' + (only ? ('?tireuse_bec=' + encodeURIComponent(only)) : '');
-  const wsUrl = proto + '://' + location.host + '/ws/panel/' + (location.search || '');
-  const cards = new Map();
-  function getCard(slug, title){
-    if(cards.has(slug)) return cards.get(slug);
-    const el = document.createElement('div');
-    el.className = 'card';
-    el.innerHTML = `
-      <h2 style="margin-top:0">${title} <small style="color:#777">(${slug})</small></h2>
-      <div class="stat">Vanne: <span class="badge off" data-role="etat">Fermée</span></div>
-      <div>Carte présente: <b data-role="present">non</b></div>
-      <div>UID: <span class="mono" data-role="uid">—</span></div>
-      <div>Autorisation: <b data-role="auth">—</b></div>
-      <div>Débit: <b data-role="debit">0.00</b> L/min &nbsp; Volume: <b data-role="volume">0</b> mL</div>
-      <div data-role="msg" style="color:#555;margin-top:6px"></div>
-    `;
-    document.body.appendChild(el);
-    const refs = {
+  // crée (une fois) l'unique carte
+  function ensureSingleCard() {
+    let el = document.querySelector('#single-card');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'single-card';
+      el.className = 'card';
+      el.innerHTML = `
+        <h2 style="margin-top:0">
+          <span data-role="title">Liquide</span>
+          <small style="color:#777">(<span data-role="slug">—</span>)</small>
+        </h2>
+        <div class="stat">Vanne: <span class="badge off" data-role="etat">Fermée</span></div>
+        <div>Carte présente: <b data-role="present">non</b></div>
+        <div>UID: <span class="mono" data-role="uid">—</span></div>
+        <div>Autorisation: <b data-role="auth">—</b></div>
+        <div>Débit: <b data-role="debit">0.00</b> L/min &nbsp; Volume: <b data-role="volume">0</b> mL</div>
+        <div data-role="msg" style="color:#555;margin-top:6px"></div>
+      `;
+      document.body.appendChild(el);
+    }
+    // renvoie les refs vers les champs
+    return {
       root: el,
+      titleEl: el.querySelector('[data-role="title"]'),
+      slugEl: el.querySelector('[data-role="slug"]'),
       etat: el.querySelector('[data-role="etat"]'),
       present: el.querySelector('[data-role="present"]'),
       uid: el.querySelector('[data-role="uid"]'),
@@ -50,34 +57,69 @@ body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin
       debit: el.querySelector('[data-role="debit"]'),
       volume: el.querySelector('[data-role="volume"]'),
       msg: el.querySelector('[data-role="msg"]'),
-      titleEl: el.querySelector('h2'),
     };
-    cards.set(slug, refs);
-    return refs;
   }
 
-  let ws;
+  const card = ensureSingleCard();
+
+  // si on a un slug ciblé, afficher tout de suite l’entête
+  if (onlySlug) {
+    card.slugEl.textContent = onlySlug;
+    card.titleEl.textContent = 'Chargement…';
+  }
+
+  // construit l'URL WS pour un slug donné
+  function wsUrlFromSlug(slug){
+    const proto = (location.protocol === 'https:') ? 'wss' : 'ws';
+    const q = slug ? ('?tireuse_bec=' + encodeURIComponent(slug)) : '';
+    return proto + '://' + location.host + '/ws/panel/' + q;
+  }
+
+  let ws = null;
   function connect(){
+    const wsUrl = wsUrlFromSlug(onlySlug);
     ws = new WebSocket(wsUrl);
+
     ws.onmessage = (e) => {
       const j = JSON.parse(e.data);
-      const slug = (j.tireuse_bec || 'default').toLowerCase();
-      const title = j.liquid_label || 'Liquide';
-      const c = getCard(slug, title);
-      c.titleEl.firstChild.textContent = title + ' ';
-      c.etat.textContent = j.vanne_ouverte ? 'Ouverte' : 'Fermée';
-      c.etat.className = 'badge ' + (j.vanne_ouverte ? 'on' : 'off');
-      c.present.textContent = j.present ? 'oui' : 'non';
-      c.uid.textContent = j.uid || '—';
-      c.auth.textContent = j.authorized ? 'autorisée' : 'refusée';
-      c.debit.textContent = (j.debit_l_min||0).toFixed(2);
-      c.volume.textContent = Math.round(j.volume_ml||0);
-      c.msg.textContent = j.message || '';
+
+      // redirection automatique après rename (message redirect_to)
+      if (j.redirect_to) {
+        const newSlug = String(j.redirect_to).trim().toLowerCase();
+        if (newSlug && newSlug !== onlySlug) {
+          onlySlug = newSlug;
+          // update URL de la page sans recharger (utile au reboot)
+          const newParams = new URLSearchParams(location.search);
+          newParams.set('tireuse_bec', newSlug);
+          history.replaceState(null, '', location.pathname + '?' + newParams.toString());
+          try { ws.close(); } catch(e){}
+          setTimeout(connect, 100);
+          return;
+        }
+      }
+
+      const slug = (j.tireuse_bec || onlySlug || 'default').toLowerCase();
+
+      // si on a un slug ciblé, ignorer les autres
+      if (onlySlug && slug !== onlySlug) return;
+
+      // MAJ de l’unique carte
+      card.slugEl.textContent = slug;
+      card.titleEl.textContent = (j.liquid_label || 'Liquide');
+      card.etat.textContent = j.vanne_ouverte ? 'Ouverte' : 'Fermée';
+      card.etat.className = 'badge ' + (j.vanne_ouverte ? 'on' : 'off');
+      card.present.textContent = j.present ? 'oui' : 'non';
+      card.uid.textContent = j.uid || '—';
+      card.auth.textContent = j.authorized ? 'autorisée' : 'refusée';
+      card.debit.textContent = (j.debit_l_min || 0).toFixed(2);
+      card.volume.textContent = Math.round(j.volume_ml || 0);
+      card.msg.textContent = j.message || '';
     };
-    ws.onclose = ()=> setTimeout(connect, 1000);
+
+    ws.onclose = () => setTimeout(connect, 1000);
   }
+
   connect();
 })();
 </script>
-
 </body></html>

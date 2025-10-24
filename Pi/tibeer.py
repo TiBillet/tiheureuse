@@ -27,17 +27,13 @@ DJANGO_BASE_URL = os.environ.get("DJANGO_BASE_URL", "http://192.168.1.10:8000")
 DJANGO_AUTH_URL = f"{DJANGO_BASE_URL}/api/rfid/authorize"
 DJANGO_EVENT_URL = f"{DJANGO_BASE_URL}/api/rfid/event"
 
-#DJANGO_BASE_URL = os.environ.get("DJANGO_BASE_URL", "http://192.168.1.10:8000")
-#DJANGO_EVENT_URL = os.environ.get("DJANGO_EVENT_URL", f"{DJANGO_BASE_URL}/api/rfid/event")
 
 TIREUSE_BEC_ID = os.environ.get("TIREUSE_BEC_ID",'Soft1')
-LIQUID_LABEL = os.environ.get("LIQUID_LABEL", 'Limo')
 AGENT_SHARED_KEY = os.environ.get("AGENT_SHARED_KEY", "changeme")
 
 def push_event(payload: dict):
     base = {
         "tireuse_bec": TIREUSE_BEC_ID,
-        "liquid_label": LIQUID_LABEL,
     }
     out = {**payload, **base}
     try:
