@@ -19,4 +19,4 @@ exec chromium-browser \
   --check-for-update-interval=31536000 \
   --kiosk "$URL" --incognito --overscroll-history-navigation=0 \
   --autoplay-policy=no-user-gesture-required --start-fullscreen
-EOF
+
