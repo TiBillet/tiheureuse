@@ -16,9 +16,6 @@ def _safe(slug: str) -> str:
 
 @admin.register(TireuseBec)
 class TireuseBecAdmin(admin.ModelAdmin):
-#    list_display=("slug","liquid_label","unit_label","unit_ml","enabled","notes")
-#    list_editable = ("liquid_label","enabled","notes")
-#    search_fields = ("slug","liquid_label")
     form = TireuseBecForm
     list_display = ("slug", "agent_base_url", "liquid_label", "unit_label", "unit_ml", "enabled", "notes")
     list_editable = ("liquid_label", "agent_base_url", "unit_label", "unit_ml", "enabled")
@@ -37,7 +34,7 @@ class TireuseBecAdmin(admin.ModelAdmin):
         ok, ko = 0, 0
         for tb in queryset:
             try:
-            # construit l’URL cible sur ce Pi
+            # construit URL cible sur le Pi
                 target = f"{request.scheme}://{request.get_host()}/?tireuse_bec={tb.slug}"
                 endpoint = (tb.agent_base_url or "").rstrip("/") + "/agent/kiosk/set_url"
                 r = requests.post(

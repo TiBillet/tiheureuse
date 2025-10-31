@@ -84,15 +84,26 @@ def api_rfid_event(request):
     bec_slug = (slug_in or "defaut").strip().lower()
     label_hint = (data.get("liquid_label") or "").strip()
 
+    xff = (request.META.get("HTTP_X_FORWARDED_FOR") or "").split(",")[0].strip()
+    client_ip = xff or request.META.get("REMOTE_ADDR") or ""
+
+    agent_base_url = (data.get("agent_base_url") or "").strip()
+    if not (agent_base_url.startswith("http") and "0.0.0.0" not in agent_base_url):
+    # fallback fiable : reconstruire depuis l’IP source + port défaut 5000
+        agent_base_url = f"http://{client_ip}:5000"
+
     tireuse_bec, created = TireuseBec.objects.get_or_create(slug=bec_slug, defaults={
         "liquid_label": "Liquide"})
+    if getattr(tireuse_bec, "agent_base_url", "") != agent_base_url:
+        tireuse_bec.agent_base_url = agent_base_url
+        tireuse_bec.save(update_fields=["agent_base_url"])
 
 
     # --- Gestion de session (1 session ouverte max) ---
     open_s = RfidSession.objects.filter(tireuse_bec=tireuse_bec, ended_at__isnull=True).order_by("-started_at").first()
 
     if present and uid:
-        # nouvelle carte OU première détection : (si open_s d'un autre uid, on le clôt)
+        # nouvelle carte OU première detection : (si open_s d'un autre uid, on l'arrete)
         if open_s and open_s.uid != uid:
             open_s.close_with_volume(volume_ml)
             open_s= None
@@ -120,7 +131,7 @@ def api_rfid_event(request):
                 last_message=message,
             )
         else:
-            # mise à jour continue (volume, message, autorisation)
+            # mise à jour continue
             card_obj = open_s.card
             open_s.volume_end_ml = volume_ml
             open_s.authorized = authorized
@@ -128,7 +139,7 @@ def api_rfid_event(request):
             open_s.save(update_fields=["volume_end_ml","authorized","last_message"])
 
     else:
-        # pas de carte présente -> clôturer la session ouverte s'il y en a une
+        # pas de carte présente -> cloturer si session ouverte
         if open_s:
             open_s.last_message = message
             open_s.close_with_volume(volume_ml)
@@ -172,7 +183,6 @@ def api_rfid_event(request):
 
     ch = get_channel_layer()
     slug_safe = _safe(tireuse_bec.slug)
-#    async_to_sync(ch.group_send)("rfid_state", {"type":"state.update","payload":payload})
 # 1) Groupe global (pour une page "supervision" qui voit tout)
     async_to_sync(ch.group_send)(
         "rfid_state.all",

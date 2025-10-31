@@ -1,7 +1,6 @@
 [Unit]
 Description=Chromium Kiosk
 After=systemd-user-sessions.service network-online.target getty@tty1.service
-#After=network-online.target systemd-user-sessions.service
 Wants=network-online.target
 
 #evite le conflit avec le login sur tty1 pendant qu'X l'utilise
@@ -22,7 +21,6 @@ PAMName=login
 TTYPath=/dev/tty1
 
 # lance le serveur X puis xinit (qui lit ~/.xinitrc)
-#ExecStart=/bin/bash -lc 'startx -- -nocursor'
 ExecStart=/usr/bin/xinit /home/sysop/.xinitrc -- /usr/lib/xorg/Xorg :0 -nolisten tcp vt1 -keeptty
 Restart=always
 RestartSec=5

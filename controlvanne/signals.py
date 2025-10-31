@@ -50,9 +50,8 @@ def on_tireusebec_changed(sender, instance: TireuseBec, created, **kwargs):
         f"rfid_state.{new_safe}",
         {"type": "state.update", "payload": payload}
     )
-#    slug_group = f"rfid_state.{_safe(instance.slug)}"
-#    async_to_sync(ch.group_send)(slug_group, {"type": "state.update", "payload": payload})
-#    async_to_sync(ch.group_send)("rfid_state.all", {"type": "state.update", "payload": payload})
+
+    async_to_sync(ch.group_send)("rfid_state.all", {"type": "state.update", "payload": payload})
 
     # si rename: pousser aussi vers l'ancien groupe (pour écrans encore abonnés)
     old_slug = getattr(instance, "_old_slug", None)

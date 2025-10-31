@@ -17,7 +17,7 @@ class Card(models.Model):
     def __str__(self): return self.label or self.uid
 
 class TireuseBec(models.Model):
-    """Un distributeur physique """
+    # Bec physique
     slug = models.SlugField(max_length=50, unique=True, help_text="Identifiant technique: ex. 'Biere', 'soft'")
     liquid_label = models.CharField(max_length=100, default="Liquide", help_text="Nom affiché du liquide")
     enabled = models.BooleanField(default=True)
@@ -35,15 +35,13 @@ class TireuseBec(models.Model):
         return self.slug
 
 class RfidSession(models.Model):
-    """presence continue d'une carte (du 'present=True' jusqu'au 'present=False')."""
+    # presence continue d'une carte (de present=True a present=False)
     uid = models.CharField(max_length=32, db_index=True)
     card = models.ForeignKey(Card, null=True, blank=True, on_delete=models.SET_NULL, related_name='sessions')
     label_snapshot = models.CharField(max_length=100, blank=True, help_text="Copie du label au début")
     authorized = models.BooleanField(default=False)
-
     tireuse_bec = models.ForeignKey(TireuseBec, on_delete=models.CASCADE, related_name="sessions", null=True, blank=True)
     liquid_label_snapshot = models.CharField(max_length=100, blank=True, help_text="Copie du nom du liquide au début")
-
     unit_label_snapshot = models.CharField(max_length=20, blank=True, default="")
     unit_ml_snapshot = models.DecimalField(max_digits=8, decimal_places=2, default=Decimal("100.00"))
     allowed_ml_session = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))

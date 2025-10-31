@@ -12,14 +12,13 @@ EnvironmentFile=/etc/default/tibeer.env
 
 Environment=PYTHONUNBUFFERED=1
 
-# --- S’assurer que le bon VT est actif et mappé sur fb0 ---
+# bon VT est actif et mappé sur fb0
 ExecStartPre=/bin/sh -c 'chvt 1; sleep 0.2; con2fbmap 1 0 || true'
 
 ExecStart=/home/sysop/.venv/bin/python /home/sysop/tibeer.py
 Restart=always
 RestartSec=2
 
-# Permet à SDL fbcon d’accéder au TTY
 TTYPath=/dev/tty1
 StandardInput=tty
 StandardOutput=journal
@@ -31,4 +30,3 @@ NoNewPrivileges=false
 
 [Install]
 WantedBy=multi-user.target
-EOF

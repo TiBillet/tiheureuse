@@ -32,7 +32,7 @@ class PanelConsumer(AsyncJsonWebsocketConsumer):
         await self.send_json(event["payload"])
 
 
-    # ---------- helpers ----------
+    # helpers
     @database_sync_to_async
     def _initial_payload(self, only_slug: str):
         if not only_slug or only_slug == "all":
@@ -58,7 +58,7 @@ class PanelConsumer(AsyncJsonWebsocketConsumer):
             "liquid_label": tb.liquid_label,
             "present": bool(open_s and open_s.uid),
             "authorized": bool(open_s.authorized) if open_s else False,
-            "vanne_ouverte": False,   # le serveur ne sait pas l’état GPIO → false par défaut
+            "vanne_ouverte": False,
             "volume_ml": float(open_s.volume_end_ml if open_s else 0.0),
             "debit_l_min": 0.0,
             "message": open_s.last_message if open_s else "",
