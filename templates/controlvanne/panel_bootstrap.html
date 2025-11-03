@@ -94,8 +94,12 @@
     el.classList.add(ouverte ? 'bg-success' : 'bg-danger');
     el.textContent = ouverte ? 'Ouverte' : 'Fermée';
   }
+  const endTimers = {}; // slug -> timeoutId
+  function clearEndTimer(slug){
+  if (endTimers[slug]) { clearTimeout(endTimers[slug]); delete endTimers[slug]; }
+  }
 
-  // WS: abonne-toi au groupe ALL + au groupe ciblé (si slugFocus)
+  // WS abonne groupe ALL + au groupe ciblé (si slugFocus)
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   const sockets = [];
   function openWS(path){
@@ -105,36 +109,72 @@
     ws.onerror = e => console.error('WS error', path, e);
     ws.onmessage = ev => {
       try {
-        const data = JSON.parse(ev.data);
-        const payload = data.payload || data; // selon consumer
-        const slug = (payload.tireuse_bec || '').toLowerCase();
-        if (!slug || !(slug in cards)) return;
-        // maj card
-        const c = cards[slug];
-        c.uid.textContent = payload.uid || '—';
-        setBadge(c.auth, !!payload.authorized);
-        setVanne(c.state, !!payload.vanne_ouverte);
-        c.flow.textContent = (payload.debit_l_min || 0).toFixed(2);
-        c.flowbar.style.width = clamp((payload.debit_l_min || 0)*10, 0, 100) + '%'; // échelle simple
-        c.vol.textContent = (payload.volume_ml || 0).toFixed(0);
-        c.msg.textContent = payload.message || '';
-        if (payload.liquid_label) c.liquid.textContent = payload.liquid_label;
-        if (payload.agent_base_url) c.agent.textContent = payload.agent_base_url;
+          const data = JSON.parse(ev.data);
+          const payload = data.payload || data; // selon consumer
+          const slug = (payload.tireuse_bec || '').toLowerCase();
+          const c = cards[slug];
+          if (!c) return;
+          // Presence carte
+          if (payload.present) {
+            clearEndTimer(slug);
+            c.uid.textContent = payload.uid || '—';
+            setBadge(c.auth, !!payload.authorized);
+            setVanne(c.state, !!payload.vanne_ouverte);
+            c.flow.textContent = (payload.debit_l_min || 0).toFixed(2);
+            c.flowbar.style.width = clamp((payload.debit_l_min || 0) * 10, 0, 100) + '%'; // échelle simple
+            c.vol.textContent = (payload.volume_ml || 0).toFixed(0);
+            c.msg.textContent = payload.message || '';
+            if (payload.liquid_label) c.liquid.textContent = payload.liquid_label;
+            if (payload.agent_base_url) c.agent.textContent = payload.agent_base_url;
+            return;
+          }
+          // Fin de session
+          if (payload.session_done) {
+            clearEndTimer(slug);
+            // figer l'affichage de fin de session
+            setBadge(c.auth, false);
+            setVanne(c.state, false);
+            c.flow.textContent = '0.00';
+            c.flowbar.style.width = '0%';
+            // Affiche volume de la session + solde
+            const volSession = (payload.session_volume_ml || 0).toFixed(0);
+            const balanceTxt = (payload.balance != null) ? ` | Solde: ${payload.balance}` : '';
+            c.vol.textContent = volSession; // affiche volume de la session
+            c.msg.textContent = (payload.message || 'Session terminée') + balanceTxt;
+
+            // après 10 s → retour à “idle”
+            endTimers[slug] = setTimeout(() => {
+             setBadge(c.auth, false);
+             setVanne(c.state, false);
+             c.flow.textContent = '0.00';
+             c.flowbar.style.width = '0%';
+             c.vol.textContent = '0';
+             c.msg.textContent = 'En attente carte…';
+             clearEndTimer(slug);
+            }, 10000);
+           return;
+          }
+          // cas "pas de carte / idle" sans session_done (ex: boot/reset)
+          setBadge(c.auth, false);
+          setVanne(c.state, false);
+          c.flow.textContent = '0.00';
+          c.flowbar.style.width = '0%';
+          c.msg.textContent = p.message || 'En attente carte…';
+
       } catch(e){ console.error('WS parse', e); }
     };
     sockets.push(ws);
   }
 
   // Routes Channels
-//  openWS('/ws/rfid/all/');                // supervision globale
-//  if (slugFocus) openWS(`/ws/rfid/${encodeURIComponent(slugFocus)}/`);  // flux ciblé
       if (!slugFocus || slugFocus === 'all') {
     // mode “mur” → on écoute rfid_state.all
     openWS('/ws/rfid/all/');
-  } else {
+      }
+      else {
           // mode ciblé → on écoute uniquement le slug
           openWS(`/ws/rfid/${encodeURIComponent(slugFocus)}/`);
-          }
+      }
 })();
 </script>
 {% endblock %}

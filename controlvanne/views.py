@@ -183,11 +183,14 @@ def api_rfid_event(request):
         "present": present,
         "authorized": authorized,
         "vanne_ouverte": vanne_ouverte,
-        "volume_ml": volume_ml,
-        "debit_l_min": debit_l_min,
+        # LIVE total
+        "volume_ml": float(open_s.volume_end_ml or 0.0),
+        "debit_l_min": float(debit_l_min),
+        # FIN DE SESSION
+        "session_done": True,
+        "session_volume_ml": float(open_s.volume_delta_ml or 0.0),
         "message": message,
         "balance": balance_val,
-
     }
 
     ch = get_channel_layer()

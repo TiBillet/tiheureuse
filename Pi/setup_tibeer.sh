@@ -77,7 +77,7 @@ EOSU
 
 echo "[7/10] Fichiers d’environnement & policies Chromium…"
 # Environnement tibeer (lu par systemd)
-tee /etc/default/tibeer >/dev/null <<EOF
+tee /etc/default/tibeer.env >/dev/null <<EOF
 AGENT_PORT=${AGENT_PORT}
 AGENT_BASE_URL=http://${AGENT_BASE_URL}:${AGENT_PORT}
 DJANGO_BASE_URL=${DJANGO_BASE_URL}
@@ -85,7 +85,7 @@ AGENT_SHARED_KEY=${AGENT_SHARED_KEY}
 TIREUSE_BEC_ID=${TIREUSE_BEC_ID}
 LIQUID_LABEL=${LIQUID_LABEL}
 EOF
-chmod 644 /etc/default/tibeer
+chmod 644 /etc/default/tibeer.env
 
 # URL du kiosk (lu par ~/.xinitrc)
 tee "/home/${SYSUSER}/kiosk.env" >/dev/null <<EOF
@@ -246,7 +246,7 @@ Requires=pigpiod.service
 Type=simple
 User=sysop
 WorkingDirectory=/home/sysop
-EnvironmentFile=-/etc/default/tibeer
+EnvironmentFile=-/etc/default/tibeer.env
 ExecStart=/home/sysop/.venv/bin/python /home/sysop/tibeer.py
 Restart=always
 RestartSec=2

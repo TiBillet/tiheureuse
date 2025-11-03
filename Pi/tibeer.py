@@ -20,6 +20,9 @@ AGENT_SHARED_KEY=os.environ.get("AGENT_SHARED_KEY","changeme")
 TIREUSE_BEC_ID=(os.environ.get("TIREUSE_BEC_ID","defaut") or "defaut").strip().lower()
 LIQUID_LABEL=os.environ.get("LIQUID_LABEL","Liquide")
 
+PUSH_PERIOD_S = 0.2
+last_push_ts = 0.0  # throttle pour push_event "live"
+
 HOST=os.environ.get("AGENT_HOST","0.0.0.0")
 PORT=int(os.environ.get("AGENT_PORT","5000"))
 
@@ -162,7 +165,6 @@ def is_authorized(uid_hex: str):
     return (ok and allowed_ml > 0.0), allowed_ml
 
 # ---- RFID loop: ouvre tant que carte autorisee et solde suffisant presente ----
-last_seen_ts = 0.0
 _message = ""
 authorized_current = False
 current_uid = None
@@ -176,6 +178,8 @@ def _short(uid_hex: str, keep=8):
 
 def rfid_loop():
     global current_uid, authorized_current, last_seen_ts, _message
+    global last_seen_ml, session_base_ml, session_allowed_ml, last_push_ts
+    last_seen_ts = time.monotonic()
     if not (RFID_ENABLE and rfid and rfid.is_ready):
         print("RFID désactivé ou non initialisé.")
         return
@@ -221,8 +225,9 @@ def rfid_loop():
             else:
                 # même carte toujours présente
                 last_seen_ts = now
+                cur_ml = compteur.volume_l() * 1000.0
+
                 if vanne.est_ouverte() and session_allowed_ml > 0.0:
-                    cur_ml = compteur.volume_l() * 1000.0
                     if (cur_ml - session_base_ml) >= (session_allowed_ml - 0.5):  # petite marge anti-jitter
                         vanne.fermer()
                         compteur.disable()
@@ -232,6 +237,15 @@ def rfid_loop():
                             "vanne_ouverte": False, "volume_ml": cur_ml,
                             "debit_l_min": compteur.debit_l_min(), "message": _message,
                         })
+                    if (now - last_push_ts) >= PUSH_PERIOD_S:
+                        last_push_ts = now
+                        push_event({
+                            "uid": current_uid, "present": True, "authorized": authorized_current,
+                            "vanne_ouverte": vanne.est_ouverte(),
+                            "volume_ml": cur_ml,
+                            "debit_l_min": compteur.debit_l_min(),
+                            "message": _message,
+                        })
         else:
             # Carte retirée (après délai de grâce)
             if current_uid is not None and (now - last_seen_ts)*1000 > RFID_PRESENCE_GRACE_MS:
@@ -240,18 +254,22 @@ def rfid_loop():
                 if vanne.est_ouverte():
                     vanne.fermer()
                     compteur.disable()
-                _message = "Aucune carte"
-                push_event({
-                    "uid": None,
-                    "present": False,
-                    "authorized": False,
-                    "vanne_ouverte": False,
-                    "volume_ml": compteur.volume_l()*1000.0,
-                    "debit_l_min": compteur.debit_l_min(),
-                    "message": _message,
-                })
+                    # Volume de la session
+                    consumed_ml = max(0.0, (compteur.volume_l() * 1000.0) - session_base_ml)
+                    _message = "Aucune carte"
+                    push_event({
+                            "uid": None,
+                            "present": False,
+                            "authorized": False,
+                            "vanne_ouverte": False,
+                            "volume_ml": compteur.volume_l()*1000.0,
+                            "session_done": True,  # marqueur de fin
+                            "session_volume_ml": consumed_ml,  # volume de la session
+                            "debit_l_min": compteur.debit_l_min(),
+                            "message": _message,
+                    })
 
-        time.sleep(0.05)
+            time.sleep(0.05)
 
 # RAZ UI
 push_event({
@@ -264,14 +282,11 @@ push_event({
 "message": "Boot: aucune carte"
  })
 
-
-
 if RFID_ENABLE and rfid and rfid.is_ready:
     threading.Thread(target=rfid_loop, daemon=True).start()
     print("RFID : OK")
 else:
     print("RFID: thread non démarré (lecteur indisponible)")
-
 app=Flask(__name__)
 def require_key(f):
   @wraps(f)
@@ -291,7 +306,7 @@ def status():
         debit_l_min=compteur.debit_l_min(),
         volume_ml=compteur.volume_l()*1000.0,
         rfid_last_uid=last_uid,
-        rfid_last_seen_ms=(time.monotonic()-last_seen)*1000 if last_seen else None,
+        rfid_last_seen_ms=(time.monotonic()-last_seen_ts)*1000 if last_seen_ts else None,
         message=_message
     )
 # Overrides manuels ( piloter depuis UI)
@@ -316,7 +331,7 @@ def set_kiosk_url():
   if not url.startswith("http"): return jsonify(ok=False,error="invalid url"),400
   try: _write_kiosk_env(url); _restart_kiosk(); return jsonify(ok=True,url=url)
   except Exception as e: return jsonify(ok=False,error=str(e)),500
-
+# TODO verifier set url incorrecte , place localhost dans kiosk.ven
 @atexit.register
 def _cleanup():
   try: vanne.fermer()
