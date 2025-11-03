@@ -15,6 +15,17 @@ def _dec(x, d="0.00"):  # helper
     except: return Decimal(d)
 def index(request): return render(request, "controlvanne/index.html")
 
+def panel_multi(request):
+    slug_focus = (request.GET.get("tireuse_bec") or "").strip().lower()
+    show_all = (slug_focus in ("", "all"))
+    becs = TireuseBec.objects.order_by("slug")
+    return render(request, "controlvanne/panel_bootstrap.html", {
+        "becs": becs,
+        # slug ciblé pour afficher qu’un Pi ou tout
+        "slug_focus": "" if show_all else slug_focus,
+        "show_all": show_all,
+    })
+
 def _check_key(request):
     key = request.headers.get("X-API-Key") or request.GET.get("key")
     want = getattr(settings, "AGENT_SHARED_KEY", None)
@@ -39,8 +50,6 @@ def api_rfid_authorize(request):
     # lire la tireuse ciblée pour connaître la conversion
     tb_slug = request.GET.get("tireuse_bec") or "default"
     tb = TireuseBec.objects.filter(slug__iexact=tb_slug).first()
-
-
     card = Card.objects.filter(uid__iexact=uid).first()
     ok = bool(card and card.is_valid_now())
 

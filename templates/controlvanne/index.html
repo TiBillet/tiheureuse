@@ -1,23 +1,18 @@
-<!doctype html><html lang="fr"><head>
-<meta charset="utf-8"><title>Panneau vanne — WebSocket</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<style>
-body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin:20px;max-width:720px}
-.card{border:1px solid #ddd;border-radius:12px;padding:16px;margin-bottom:16px}
-.badge{display:inline-block;padding:6px 10px;border-radius:999px;background:#eee}
-.badge.on{background:#d1f7c4}.badge.off{background:#ffd1d1}
-.stat{font-size:18px;margin:6px 0}.mono{font-family:ui-monospace,Consolas,monospace}#status{color:#666}
-</style></head><body>
-<h1>Panneau vanne — WebSocket</h1><p><a href="/admin/">Admin</a></p>
-{% comment %}<div class="card">
-  <div class="stat">Vanne: <span id="etat" class="badge off">Fermée</span></div>
-  <div>Carte présente: <b id="present">non</b></div>
-  <div>UID: <span id="uid" class="mono">—</span></div>
-  <div>Autorisation: <b id="auth">—</b></div>
-  <div>Débit: <b id="debit">0.00</b> L/min &nbsp; Volume: <b id="volume">0</b> mL</div>
-  <div id="msg" style="color:#555;margin-top:6px"></div>
-  <div id="status"></div>
-</div>{% endcomment %}
+<!doctype html>
+<html lang="fr">
+    <head>
+        <meta charset="utf-8"><title>Le Bar de Mike</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous">
+    <style>
+        body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin:20px;max-width:720px}
+        .card{border:1px solid #ddd;border-radius:12px;padding:16px;margin-bottom:16px}
+        .badge{display:inline-block;padding:6px 10px;border-radius:999px;background:#eee}
+        .badge.on{background:#d1f7c4}.badge.off{background:#ffd1d1}
+        .stat{font-size:18px;margin:6px 0}.mono{font-family:ui-monospace,Consolas,monospace}#status{color:#666}
+    </style></head>
+    <body>
+        <h1>Le Bar de Mike</h1><p><a href="/admin/">Admin</a></p>
 <script>
 (function () {
   // slug cible (exigé pour un kiosque par bec)

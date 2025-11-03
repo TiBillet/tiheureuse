@@ -1,0 +1,140 @@
+{% extends "base.html" %}
+{% block title %}Chez Mike's Bar{% endblock %}
+
+{% block content %}
+  {% if slug_focus %}
+    <div class="alert alert-info">Vue ciblée : <strong>{{ slug_focus }}</strong></div>
+  {% endif %}
+
+  <div class="row g-3" id="cards-grid">
+    {% for b in becs %}
+      {% if show_all or slug_focus == b.slug %}
+      <div class="col-12 col-md-6 col-lg-4" id="card-col-{{ b.slug }}">
+        <div class="card h-100" data-slug="{{ b.slug }}">
+          <div class="card-header d-flex justify-content-between align-items-center">
+            <div>
+              <span class="badge bg-secondary me-2">{{ b.slug }}</span>
+              <strong class="text-info" id="liquid-{{ b.slug }}">{{ b.liquid_label|default:"Liquide" }}</strong>
+            </div>
+            <span class="badge bg-dark" id="agent-url-{{ b.slug }}">{{ b.agent_base_url|default:"(agent inconnu)" }}</span>
+          </div>
+
+          <div class="card-body">
+            <div class="d-flex align-items-center mb-2">
+              <span class="me-2">État vanne :</span>
+              <span class="badge bg-danger" id="state-{{ b.slug }}">Fermée</span>
+            </div>
+
+            <div class="small text-muted">UID :</div>
+            <div class="mb-2"><code id="uid-{{ b.slug }}">—</code></div>
+
+            <div class="d-flex align-items-center mb-2">
+              <span class="me-2">Autorisation :</span>
+              <span class="badge bg-secondary" id="auth-{{ b.slug }}">—</span>
+            </div>
+
+            <div class="mb-2">
+              <div class="d-flex justify-content-between">
+                <span>Débit (L/min)</span>
+                <span class="stat" id="flow-{{ b.slug }}">0.00</span>
+              </div>
+              <div class="progress" style="height:6px;">
+                <div class="progress-bar" id="flowbar-{{ b.slug }}" role="progressbar" style="width:0%"></div>
+              </div>
+            </div>
+
+            <div class="d-flex justify-content-between">
+              <span>Volume (ml)</span>
+              <span class="stat" id="vol-{{ b.slug }}">0</span>
+            </div>
+          </div>
+
+          <div class="card-footer">
+            <small id="msg-{{ b.slug }}" class="text-muted">En attente…</small>
+          </div>
+        </div>
+      </div>
+      {% endif %}
+    {% empty %}
+      <div class="col-12">
+        <div class="alert alert-warning">Aucune tireuse_bec définie.</div>
+      </div>
+    {% endfor %}
+  </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function(){
+  const slugFocus = "{{ slug_focus }}";
+  const cards = {};
+  document.querySelectorAll('.card[data-slug]').forEach(card => {
+    const s = card.dataset.slug;
+    cards[s] = {
+      uid: document.getElementById('uid-'+s),
+      auth: document.getElementById('auth-'+s),
+      state: document.getElementById('state-'+s),
+      flow: document.getElementById('flow-'+s),
+      flowbar: document.getElementById('flowbar-'+s),
+      vol: document.getElementById('vol-'+s),
+      msg: document.getElementById('msg-'+s),
+      liquid: document.getElementById('liquid-'+s),
+      agent: document.getElementById('agent-url-'+s),
+    };
+  });
+
+  function clamp(n, min, max){ return Math.max(min, Math.min(max, n)); }
+  function setBadge(el, ok){
+    el.classList.remove('bg-secondary','bg-danger','bg-success','bg-warning','bg-info','bg-dark');
+    el.classList.add(ok ? 'bg-success' : 'bg-danger');
+    el.textContent = ok ? 'Autorisé' : 'Refusé';
+  }
+  function setVanne(el, ouverte){
+    el.classList.remove('bg-danger','bg-success');
+    el.classList.add(ouverte ? 'bg-success' : 'bg-danger');
+    el.textContent = ouverte ? 'Ouverte' : 'Fermée';
+  }
+
+  // WS: abonne-toi au groupe ALL + au groupe ciblé (si slugFocus)
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  const sockets = [];
+  function openWS(path){
+    const ws = new WebSocket(`${proto}://${location.host}${path}`);
+    ws.onopen = () => console.log('WS open', path);
+    ws.onclose = () => console.warn('WS close', path);
+    ws.onerror = e => console.error('WS error', path, e);
+    ws.onmessage = ev => {
+      try {
+        const data = JSON.parse(ev.data);
+        const payload = data.payload || data; // selon consumer
+        const slug = (payload.tireuse_bec || '').toLowerCase();
+        if (!slug || !(slug in cards)) return;
+        // maj card
+        const c = cards[slug];
+        c.uid.textContent = payload.uid || '—';
+        setBadge(c.auth, !!payload.authorized);
+        setVanne(c.state, !!payload.vanne_ouverte);
+        c.flow.textContent = (payload.debit_l_min || 0).toFixed(2);
+        c.flowbar.style.width = clamp((payload.debit_l_min || 0)*10, 0, 100) + '%'; // échelle simple
+        c.vol.textContent = (payload.volume_ml || 0).toFixed(0);
+        c.msg.textContent = payload.message || '';
+        if (payload.liquid_label) c.liquid.textContent = payload.liquid_label;
+        if (payload.agent_base_url) c.agent.textContent = payload.agent_base_url;
+      } catch(e){ console.error('WS parse', e); }
+    };
+    sockets.push(ws);
+  }
+
+  // Routes Channels
+//  openWS('/ws/rfid/all/');                // supervision globale
+//  if (slugFocus) openWS(`/ws/rfid/${encodeURIComponent(slugFocus)}/`);  // flux ciblé
+      if (!slugFocus || slugFocus === 'all') {
+    // mode “mur” → on écoute rfid_state.all
+    openWS('/ws/rfid/all/');
+  } else {
+          // mode ciblé → on écoute uniquement le slug
+          openWS(`/ws/rfid/${encodeURIComponent(slugFocus)}/`);
+          }
+})();
+</script>
+{% endblock %}

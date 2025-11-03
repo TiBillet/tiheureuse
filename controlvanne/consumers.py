@@ -12,17 +12,27 @@ def sanitize(slug: str) -> str:
 
 class PanelConsumer(AsyncJsonWebsocketConsumer):
     async def connect(self):
-        qs = parse_qs(self.scope.get("query_string", b"").decode() if self.scope.get("query_string") else "")
-        only = sanitize((qs.get("tireuse_bec", [""])[0] or ""))
-        self.group = f"rfid_state.{only or 'ALL'}"
+        # = parse_qs(self.scope.get("query_string", b"").decode() if self.scope.get("query_string") else "")
+        #only = sanitize((qs.get("tireuse_bec", [""])[0] or ""))
+
+        #self.group = f"rfid_state.{only or 'ALL'}"
         ###Log
-        print(f"[WS] connect group={self.group} qs={qs}")
+        #print(f"[WS] connect group={self.group} qs={qs}")
         ###
+        #await self.channel_layer.group_add(self.group, self.channel_name)
+        #await self.accept()
+        group = self.scope.get('url_route', {}).get('kwargs', {}).get('slug')
+        if group:
+            self.group = f"rfid_state.{group.lower()}"
+        else:
+            self.group = self.scope.get('group', 'rfid_state.ALL')
         await self.channel_layer.group_add(self.group, self.channel_name)
         await self.accept()
-        init_payload = await self._initial_payload(only)
-        if init_payload:
-            await self.send_json(init_payload)
+
+
+       # init_payload = await self._initial_payload(only)
+        #if init_payload:
+        #    await self.send_json(init_payload)
 
 
     async def disconnect(self, code):
