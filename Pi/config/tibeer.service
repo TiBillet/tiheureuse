@@ -1,0 +1,22 @@
+[Unit]
+Description=TiBeer Agent - Contrôleur de tireuse connectée
+After=network.target network-online.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+User=sysop
+Group=sysop
+WorkingDirectory=/home/sysop/tibeer
+EnvironmentFile=/home/sysop/.env
+ExecStart=/usr/bin/python3 /home/sysop/tibeer/main.py
+Restart=always
+RestartSec=5s
+NotifyAccess=all
+
+# Permissions pour GPIO et devices
+DeviceAllow=/dev/gpiomem rw
+DeviceAllow=/dev/ttyS0 rw
+
+[Install]
+WantedBy=multi-user.target
