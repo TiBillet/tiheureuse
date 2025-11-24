@@ -1,32 +1,22 @@
-# sur Pi /etc/systemd/system/tibeer.service
 [Unit]
-Description=Agent RFID + Vanne (tibeer)
-After=network-online.target getty@tty1.service
+Description=TiBeer Agent - Contrôleur de tireuse connectée
+After=network.target network-online.target
 Wants=network-online.target
 
 [Service]
-Type=simple
+Type=notify
 User=sysop
-WorkingDirectory=/home/sysop
-EnvironmentFile=/etc/default/tibeer.env
-
-Environment=PYTHONUNBUFFERED=1
-
-# bon VT est actif et mappé sur fb0
-ExecStartPre=/bin/sh -c 'chvt 1; sleep 0.2; con2fbmap 1 0 || true'
-
-ExecStart=/home/sysop/.venv/bin/python /home/sysop/tibeer.py
+Group=sysop
+WorkingDirectory=/home/sysop/tibeer
+EnvironmentFile=/home/sysop/.env
+ExecStart=/usr/bin/python3 /home/sysop/tibeer/main.py
 Restart=always
-RestartSec=2
+RestartSec=5s
+NotifyAccess=all
 
-TTYPath=/dev/tty1
-StandardInput=tty
-StandardOutput=journal
-StandardError=journal
-
-# Donne accès aux GPIO/SPI même sans login
-AmbientCapabilities=CAP_SYS_RAWIO
-NoNewPrivileges=false
+# Permissions pour GPIO et devices
+DeviceAllow=/dev/gpiomem rw
+DeviceAllow=/dev/ttyS0 rw
 
 [Install]
 WantedBy=multi-user.target

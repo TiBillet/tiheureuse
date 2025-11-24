@@ -76,17 +76,28 @@ def push_event(payload: dict):
 
 
 class Vanne:
-  def __init__(self): self._o=False; self._t0=0.0; self.lock=threading.Lock()
+  """
+  Ce truc sert a faire ceci
+  """
+  def __init__(self):
+      self.ouvert=False
+      self._t0=0.0
+      self.lock=threading.Lock()
+
   def ouvrir(self):
-    with self.lock: pi.write(PIN_VANNE,1); self._o=True; self._t0=time.monotonic()
+    with self.lock:
+      pi.write(PIN_VANNE,1)
+      self.ouvert=True
+      self._t0=time.monotonic()
+
   def fermer(self):
     with self.lock:
-      if self._o:
+      if self.ouvert:
         dt=time.monotonic()-self._t0; mn=RFID_MIN_OPEN_MS/1000.0
         if dt<mn: time.sleep(mn-dt)
-      pi.write(PIN_VANNE,0); self._o=False
+      pi.write(PIN_VANNE,0); self.ouvert=False
   def est_ouverte(self):
-    with self.lock: return self._o
+    with self.lock: return self.ouvert
 vanne=Vanne()
 
 class Compteur:
@@ -150,6 +161,10 @@ def is_authorized(uid_hex: str):
         )
         if r.ok:
             j = r.json()
+            j = {
+                "carte" : "1234568",
+                "ml": 1000
+            }
             ok = bool(j.get("authorized", False))
             allowed_ml = float(j.get("allowed_ml") or 0.0)
             enough = bool(j.get("enough_funds", allowed_ml > 0.0))

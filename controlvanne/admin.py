@@ -17,14 +17,15 @@ def _safe(slug: str) -> str:
 @admin.register(TireuseBec)
 class TireuseBecAdmin(admin.ModelAdmin):
     form = TireuseBecForm
-    list_display = ("slug", "agent_base_url", "liquid_label", "unit_label", "unit_ml", "enabled", "notes")
+    list_display = ("slug", "agent_base_url", "liquid_label","reservoir_ml", "seuil_mini_ml", "appliquer_reserve", "unit_label", "unit_ml", "enabled", "notes")
     list_editable = ("liquid_label", "agent_base_url", "unit_label", "unit_ml", "enabled")
     search_fields = ("slug", "liquid_label", "notes")
     list_filter = ("enabled",)
     ordering = ("slug",)
     fieldsets = (
-        (None, {"fields": ("slug", "liquid_label")}),
+        ("Boisson", {"fields": ("slug", "liquid_label")}),
         ("Unité / Conversion", {"fields": ("unit_label", "unit_ml")}),
+        ("Stock et seuil", {"fields": ("reservoir_ml","seuil_mini_ml", "appliquer_reserve")}),
         ("Autres", {"fields": ("enabled", "notes")}),
     )
     actions = ["push_kiosk_url",

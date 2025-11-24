@@ -29,8 +29,14 @@ class TireuseBec(models.Model):
                                   help_text="Millilitres par unité (ex: 100.00 ml = 10 cL)")
     agent_base_url = models.CharField(
         max_length=200, blank=True, default="http://192.168.1.56:5000",
-        help_text="URL de l'agent Flask sur le Pi (ex: http://pi:5000)"
-    )
+        help_text="URL de l'agent Flask sur le Pi (ex: http://pi:5000)")
+    reservoir_ml = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("0.00"),
+                                       help_text="Volume courant en ml (décrémenté en temps réel)")
+    seuil_mini_ml = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("0.00"),
+                                           help_text="Seuil bas en ml (on réserve ce volume)")
+    appliquer_reserve = models.BooleanField(default=True, help_text="Appliquer la réserve (stock - seuil)")
+
+
     def __str__(self):
         return self.slug
 
@@ -52,6 +58,7 @@ class RfidSession(models.Model):
     volume_start_ml = models.FloatField(default=0.0)
     volume_end_ml   = models.FloatField(default=0.0)
     volume_delta_ml = models.FloatField(default=0.0)
+    dernier_volume_ml = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("0.00"))
     last_message = models.TextField(blank=True, default="")
 
     class Meta:

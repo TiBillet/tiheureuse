@@ -1,4 +1,6 @@
 import json, re, time
+from smtplib import quoteaddr
+
 from django.http import JsonResponse, HttpResponseBadRequest, HttpResponseForbidden
 from django.shortcuts import render
 from django.views.decorators.csrf import csrf_exempt
@@ -9,6 +11,7 @@ from asgiref.sync import async_to_sync
 from .models import Card, RfidSession, TireuseBec
 from decimal import Decimal, ROUND_HALF_UP
 from django.db import transaction
+from django.db.models import F
 
 def _dec(x, d="0.00"):  # helper
     try: return Decimal(str(x))
@@ -56,8 +59,19 @@ def api_rfid_authorize(request):
     unit_ml = _dec(tb.unit_ml if tb else "100.00")
     unit_label = tb.unit_label if tb else "patate"
     balance = _dec(card.balance if card else "0.00")
-    allowed_ml = (balance * unit_ml) if ok else Decimal("0.00")
-    enough_funds = allowed_ml > 0
+    quota_ml = (balance * unit_ml) if ok else Decimal("0.00")
+    enough_funds = quota_ml > 0
+
+    if card and card.is_valid_now() and unit_ml > 0:
+        quota_ml = (card.balance * unit_ml).quantize(Decimal("0.01"))
+
+    if tb.appliquer_reserve:
+        restant_ml = (tb.reservoir_ml - tb.seuil_mini_ml).quantize(Decimal("0.01"))
+        if restant_ml < 0: restant_ml = Decimal("0.00")
+    else:
+        restant_ml = Decimal("9e9")  # "infini"
+    seuil_autorise=min(quota_ml, restant_ml)
+
 
     return JsonResponse({"authorized": ok, "uid": uid,
                          "label": (card.label if card else None),
@@ -65,146 +79,227 @@ def api_rfid_authorize(request):
                          "balance": str(balance),
                          "unit_label": unit_label,
                          "unit_ml": float(unit_ml),
-                         "allowed_ml": float(allowed_ml),  # quota alloué pour cette session
+                         "seuil_autorisé": float(seuil_autorise),  # quota alloué pour cette session
                          "enough_funds": bool(enough_funds),
                          })
 
 @csrf_exempt
 def api_rfid_event(request):
-# Recoit du Pi3 et diffuse en WS
+    """
+    Reçoit du Pi des événements live:
+      - present=True, authorized, vanne_ouverte, volume_ml (total), debit_l_min, message
+      - present=False -> clôture la session (débit carte, payload session_done)
+    En parallèle, décrémente `TireuseBec.reservoir_ml` en temps réel (delta entre deux messages).
+    Diffuse en WebSocket sur:
+      - rfid_state.<slug>
+      - (optionnel) rfid_state.all
+    """
+    if not _check_key(request):
+        return HttpResponseForbidden("forbidden")
+    if request.method != "POST":
+        return HttpResponseBadRequest("POST only")
 
-    if not _check_key(request): return HttpResponseForbidden("forbidden")
-    if request.method != "POST": return HttpResponseBadRequest("POST only")
-    try: data = json.loads(request.body or b"{}")
-    except Exception: return HttpResponseBadRequest("invalid json")
+    # ---- Parse JSON ----
+    try:
+        data = json.loads(request.body or b"{}")
+    except Exception:
+        return HttpResponseBadRequest("invalid json")
 
-    uid = _norm_uid(data.get("uid"))
-    present = bool(data.get("present", False))
-    authorized = bool(data.get("authorized", False))
-    vanne_ouverte = bool(data.get("vanne_ouverte", False))
-    volume_ml = float(data.get("volume_ml") or 0.0)
-    debit_l_min = float(data.get("debit_l_min") or 0.0)
-    message = data.get("message") or ""
+    uid_raw      = data.get("uid")
+    present      = bool(data.get("present", False))
+    authorized   = bool(data.get("authorized", False))
+    vanne_ouverte= bool(data.get("vanne_ouverte", False))
+    volume_ml_in = float(data.get("volume_ml") or 0.0)         # total compteur côté Pi
+    debit_l_min  = float(data.get("debit_l_min") or 0.0)
+    message      = (data.get("message") or "").strip()
+    label_hint   = (data.get("liquid_label") or "").strip()
 
-    card_obj = None
+    uid = _norm_uid(uid_raw)
 
-    # identification du distributeur
-    slug_in = (data.get("tireuse_bec") )
-    bec_slug = (slug_in or "defaut").strip().lower()
-    label_hint = (data.get("liquid_label") or "").strip()
+    # ---- Identification de la tireuse ----
+    bec_in = (data.get("tireuse_bec") or "defaut").strip().lower()
+    bec_slug = _safe(bec_in)
+    tireuse_bec, created = TireuseBec.objects.get_or_create(
+        slug=bec_slug,
+        defaults={"liquid_label": (label_hint or "Liquide")}
+    )
+    if label_hint and tireuse_bec.liquid_label != label_hint:
+        tireuse_bec.liquid_label = label_hint
+        tireuse_bec.save(update_fields=["liquid_label"])
 
-    xff = (request.META.get("HTTP_X_FORWARDED_FOR") or "").split(",")[0].strip()
-    client_ip = xff or request.META.get("REMOTE_ADDR") or ""
+    # ---- Session ouverte (une seule max par bec) ----
+    open_s = RfidSession.objects.filter(
+        tireuse_bec=tireuse_bec, ended_at__isnull=True
+    ).order_by("-started_at").first()
 
-    agent_base_url = (data.get("agent_base_url") or "").strip()
-    if not (agent_base_url.startswith("http") and "0.0.0.0" not in agent_base_url):
-    # fallback fiable : reconstruire depuis l’IP source + port défaut 5000
-        agent_base_url = f"http://{client_ip}:5000"
+    # Prépare payload commun
+    payload = {
+        "ts": time.time(),
+        "tireuse_bec": tireuse_bec.slug,
+        "liquid_label": tireuse_bec.liquid_label,
+        "present": present,
+        "authorized": authorized,
+        "vanne_ouverte": vanne_ouverte,
+        "volume_ml": float(volume_ml_in),
+        "debit_l_min": float(debit_l_min),
+        "message": message,
+    }
 
-    tireuse_bec, created = TireuseBec.objects.get_or_create(slug=bec_slug, defaults={
-        "liquid_label": "Liquide"})
-    if getattr(tireuse_bec, "agent_base_url", "") != agent_base_url:
-        tireuse_bec.agent_base_url = agent_base_url
-        tireuse_bec.save(update_fields=["agent_base_url"])
-
-
-    # --- Gestion de session (1 session ouverte max) ---
-    open_s = RfidSession.objects.filter(tireuse_bec=tireuse_bec, ended_at__isnull=True).order_by("-started_at").first()
-
+    # ==== CAS 1 : Carte présente ====
     if present and uid:
-        # nouvelle carte OU première detection : (si open_s d'un autre uid, on l'arrete)
+        # Si une session ouverte existe mais pour un autre UID, on la clôt d'abord proprement.
         if open_s and open_s.uid != uid:
-            open_s.close_with_volume(volume_ml)
-            open_s= None
-        # re-fetch après éventuelle clôture
-        #open_s = RfidSession.objects.filter(ended_at__isnull=True).order_by("-started_at").first()
+            with transaction.atomic():
+                s = RfidSession.objects.select_for_update().get(pk=open_s.pk)
+                s.volume_end_ml = _dec(volume_ml_in)
+                if s.volume_start_ml is None:
+                    s.volume_start_ml = _dec
+                s.volume_delta_ml = (s.volume_end_ml - (s.volume_start_ml or _dec)).quantize(Decimal("0.01"))
+                s.last_message = message
+                s.ended_at = timezone.now()
+                s.save(update_fields=["volume_end_ml", "volume_delta_ml", "last_message", "ended_at"])
+            open_s = None  # on repart sur une nouvelle session
+
+        # (Re)charge la session après éventuelle clôture ci-dessus
+        open_s = RfidSession.objects.filter(
+            tireuse_bec=tireuse_bec, ended_at__isnull=True
+        ).order_by("-started_at").first()
 
         if not open_s:
+            # Nouvelle session
             card_obj = Card.objects.filter(uid__iexact=uid).first()
-            unit_ml = tireuse_bec.unit_ml
-            unit_label = tireuse_bec.unit_label
-            balance = _dec(card_obj.balance if card_obj else "0.00")
-            allowed_ml = (balance * _dec(unit_ml)) if (card_obj and card_obj.is_valid_now()) else Decimal("0.00")
+            unit_ml = _dec(tireuse_bec.unit_ml or "100.00")
             open_s = RfidSession.objects.create(
                 tireuse_bec=tireuse_bec,
                 liquid_label_snapshot=tireuse_bec.liquid_label,
                 uid=uid,
                 card=card_obj,
                 label_snapshot=(card_obj.label if card_obj else ""),
-                unit_label_snapshot=unit_label,
-                unit_ml_snapshot=_dec(unit_ml),
-                allowed_ml_session=allowed_ml,
+                unit_label_snapshot=(tireuse_bec.unit_label or "u"),
+                unit_ml_snapshot=unit_ml,
                 authorized=authorized,
                 started_at=timezone.now(),
-                volume_start_ml=volume_ml,
+                volume_start_ml=_dec(volume_ml_in),
+                last_reported_ml=_dec(volume_ml_in),
                 last_message=message,
             )
         else:
-            # mise à jour continue
-            card_obj = open_s.card
-            open_s.volume_end_ml = volume_ml
-            open_s.authorized = authorized
-            open_s.last_message = message
-            open_s.save(update_fields=["volume_end_ml","authorized","last_message"])
+            # Mise à jour live + décrément réservoir par delta
+            cur_ml = _dec(volume_ml_in)
+            with transaction.atomic():
+                s = RfidSession.objects.select_for_update().get(pk=open_s.pk)
+                tb = TireuseBec.objects.select_for_update().get(pk=tireuse_bec.pk)
 
-    else:
-        # pas de carte présente -> cloturer si session ouverte
-        if open_s:
-            open_s.last_message = message
-            open_s.close_with_volume(volume_ml)
-            card_obj = open_s.card
-            # carte OK
-            if open_s.card_id:
-                with transaction.atomic():
-                    # verrouille la carte pour MAJ solde
-                    card = Card.objects.select_for_update().get(pk=open_s.card_id)
-                    unit_ml = _dec(open_s.unit_ml_snapshot or tireuse_bec.unit_ml or "100.00")
-                    consumed_ml = _dec(open_s.volume_delta_ml or 0)
-                    if consumed_ml > 0 and unit_ml > 0:
-                        units = (consumed_ml / unit_ml).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-                        # plafonne à ce qu'il reste (sécurité)
-                        if card.balance < units: units = card.balance
-                        if units > 0:
-                            card.balance = (card.balance - units).quantize(Decimal("0.01"))
-                            card.save(update_fields=["balance"])
-                            open_s.charged_units = units
-                            open_s.save(update_fields=["charged_units"])
-# --- construit le payload SANS risquer UnboundLocalError
-    balance_val = None
-    if card_obj is not None and hasattr(card_obj, "balance"):
-        balance_val = str(card_obj.balance)  # str pour éviter les soucis Decimal JSON
+                # Calcul delta depuis dernière mesure
+                last = _dec(s.last_reported_ml or s.volume_start_ml or 0)
+                inc_ml = (cur_ml - last)
+                if inc_ml < 0:
+                    inc_ml = _dec  # sécurité si reset compteur côté Pi
 
-    # push websocket
-    payload = {
-        "ts": time.time(),
-        "uid": uid or None,
-        "tireuse_bec": tireuse_bec.slug,
-        "liquid_label": tireuse_bec.liquid_label,
-        "present": present,
-        "authorized": authorized,
-        "vanne_ouverte": vanne_ouverte,
-        # LIVE total
-        "volume_ml": float(open_s.volume_end_ml or 0.0),
-        "debit_l_min": float(debit_l_min),
-        # FIN DE SESSION
-        "session_done": True,
-        "session_volume_ml": float(open_s.volume_delta_ml or 0.0),
-        "message": message,
-        "balance": balance_val,
-    }
+                if inc_ml > 0:
+                    new_stock = (tb.reservoir_ml - inc_ml)
+                    if new_stock < 0:
+                        new_stock = _dec
+                    tb.reservoir_ml = new_stock
+                    tb.save(update_fields=["reservoir_ml"])
 
+                    s.last_reported_ml = cur_ml
+                    s.volume_end_ml = cur_ml
+                    s.authorized = authorized
+                    s.last_message = message
+                    s.save(update_fields=["last_reported_ml", "volume_end_ml", "authorized", "last_message"])
+
+        # Ajoute l’état stock dans le payload pour l’affichage
+        # (NB : pas sous transaction ici, précision “assez bonne” pour le panel)
+        room_after = tireuse_bec.reservoir_ml - tireuse_bec.low_threshold_ml
+        if room_after < 0:
+            room_after = _dec
+        payload.update({
+            "reservoir_ml": float(tireuse_bec.reservoir_ml),
+            "low_threshold_ml": float(tireuse_bec.low_threshold_ml),
+            "room_after_ml": float(room_after),
+        })
+
+        # Diffusion WS et réponse
+        _ws_push(tireuse_bec.slug, payload)
+        return JsonResponse({"ok": True})
+
+    # ==== CAS 2 : Pas de carte (ou UID vide) -> clôture la session si ouverte ====
+    if open_s:
+        with transaction.atomic():
+            s = RfidSession.objects.select_for_update().select_related("tireuse_bec").get(pk=open_s.pk)
+            tb = s.tireuse_bec  # verrouillé via select_for_update si on le souhaite
+
+            end_ml = _dec(volume_ml_in)
+            start_ml = _dec(s.volume_start_ml or 0)
+            delta_ml = (end_ml - start_ml)
+            if delta_ml < 0:
+                delta_ml = _dec
+
+            s.volume_end_ml = end_ml
+            s.volume_delta_ml = delta_ml
+            s.last_message = message or "Session terminée"
+            s.ended_at = timezone.now()
+
+            # Débit carte si présente
+            balance_after = None
+            if s.card_id:
+                # calcule unités = delta_ml / unit_ml_snapshot (ou unit_ml bec)
+                unit_ml = _dec(s.unit_ml_snapshot or tb.unit_ml or "100.00")
+                if unit_ml > 0 and delta_ml > 0:
+                    units = (delta_ml / unit_ml).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                    # débit carte
+                    card = Card.objects.select_for_update().get(pk=s.card_id)
+                    if units > card.balance:
+                        units = card.balance  # plafonne au solde
+                    if units > 0:
+                        card.balance = (card.balance - units).quantize(Decimal("0.01"))
+                        card.save(update_fields=["balance"])
+                        s.charged_units = units
+                        balance_after = str(card.balance)
+                        s.save(update_fields=["charged_units"])
+
+            s.save(update_fields=["volume_end_ml", "volume_delta_ml", "last_message", "ended_at"])
+
+        # Construire payload “fin de session”
+        room_after = tireuse_bec.reservoir_ml - tireuse_bec.low_threshold_ml
+        if room_after < 0:
+            room_after = _dec
+
+        payload.update({
+            "present": False,
+            "authorized": False,
+            "vanne_ouverte": False,
+            "message": s.last_message or "Session terminée",
+            "session_done": True,
+            "session_volume_ml": float(s.volume_delta_ml or 0.0),
+            "reservoir_ml": float(tireuse_bec.reservoir_ml),
+            "low_threshold_ml": float(tireuse_bec.low_threshold_ml),
+            "room_after_ml": float(room_after),
+            "balance": balance_after,  # str ou None
+        })
+
+        _ws_push(tireuse_bec.slug, payload)
+        return JsonResponse({"ok": True})
+
+    # Pas de session ouverte => simple mise à jour “idle”
+    _ws_push(tireuse_bec.slug, payload)
+    return JsonResponse({"ok": True})
+
+
+# ---------- Push WebSocket ----------
+def _ws_push(slug: str, payload: dict, also_all: bool = True):
     ch = get_channel_layer()
-    slug_safe = _safe(tireuse_bec.slug)
-# 1) Groupe global (pour une page "supervision" qui voit tout)
-    async_to_sync(ch.group_send)(
-        "rfid_state.all",
-        {"type": "state.update", "payload": payload}
-    )
-
-# 2) Groupe ciblé (slug de la tireuse courante)
+    slug_safe = _safe(slug)
+    # groupe ciblé
     async_to_sync(ch.group_send)(
         f"rfid_state.{slug_safe}",
-        {"type": "state.update", "payload": payload}
+        {"type": "state.update", "payload": payload},
     )
+    # groupe ALL (optionnel)
+    if also_all:
+        async_to_sync(ch.group_send)(
+            "rfid_state.all",
+            {"type": "state.update", "payload": payload},
+        )
 
-    return JsonResponse({"ok": True})
