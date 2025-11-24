@@ -11,8 +11,14 @@ LOG_DIR = Path("/var/log/tibeer")
 LOG_DIR.mkdir(parents=True, exist_ok=True)  # Crée le répertoire si inexistant
 
 # --- Configuration RFID ---
-RFID_DEVICE = os.getenv("RFID_DEVICE", "/dev/ttyS0")  # Port série pour VMA405
-RFID_TIMEOUT = float(os.getenv("RFID_TIMEOUT", "1.0"))  # Timeout en secondes
+RFID_TYPE = os.getenv("RFID_TYPE", "VMA405")  # "RC522" ou "VMA405"
+RFID_DEVICE = os.getenv("RFID_DEVICE", "/dev/ttyS0")  # Pour VMA405: "/dev/ttyS0", pour RC522: "SPI"
+RFID_TIMEOUT = float(os.getenv("RFID_TIMEOUT", "1.0"))
+
+# --- Configuration RC522 (si utilisé) ---
+RC522_RST_PIN = int(os.getenv("RC522_RST_PIN", "25"))  # Pin RST du RC522
+RC522_CE_PIN = int(os.getenv("RC522_CE_PIN", "8"))    # Pin CE (Chip Enable)
+
 
 # --- Configuration Vanne ---
 VALVE_GPIO_PIN = int(os.getenv("VALVE_GPIO_PIN", "18"))  # Pin GPIO pour la vanne
