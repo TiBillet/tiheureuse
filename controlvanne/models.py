@@ -1,3 +1,5 @@
+from uuid import uuid4
+
 from django.db import models
 from django.utils import timezone
 from decimal import Decimal
@@ -18,18 +20,32 @@ class Card(models.Model):
 
 class TireuseBec(models.Model):
     # Bec physique
+    #TODO: passer en uuid unique pour sélectionner la tireuse plutôt que le slug
+    # uuid = models.UUIDField(default=uuid4, primary_key=True)
+
     slug = models.SlugField(max_length=50, unique=True, help_text="Identifiant technique: ex. 'Biere', 'soft'")
-    liquid_label = models.CharField(max_length=100, default="Liquide", help_text="Nom affiché du liquide")
+
     enabled = models.BooleanField(default=True)
     notes = models.CharField(max_length=200, blank=True)
 
+    #TODO: a supprimer ? Remplacer par une foreignKey Produit qui comporte le nom et le prix/litre
+    liquid_label = models.CharField(max_length=100, default="Liquide", help_text="Nom affiché du liquide")
     unit_label = models.CharField(max_length=20, default="patate",
                                   help_text="Nom de l'unité de solde (ex: patate)")
+
+    #TODO: a supprimer ?
     unit_ml = models.DecimalField(max_digits=8, decimal_places=2, default=Decimal("100.00"),
                                   help_text="Millilitres par unité (ex: 100.00 ml = 10 cL)")
+
+    #TODO faire une classe par constructeur
+    #TODO : Récupérer le FlowRate a travers foreignKey constructeur gere cote django
+
+    #TODO: Esce utile ? a supprimer si non
     agent_base_url = models.CharField(
         max_length=200, blank=True, default="http://192.168.1.56:5000",
         help_text="URL de l'agent Flask sur le Pi (ex: http://pi:5000)")
+
+    # TODO: Passer en entier avec modulo si besoin ?
     reservoir_ml = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("0.00"),
                                        help_text="Volume courant en ml (décrémenté en temps réel)")
     seuil_mini_ml = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("0.00"),

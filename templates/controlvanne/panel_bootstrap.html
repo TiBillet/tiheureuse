@@ -2,13 +2,10 @@
 {% block title %}Chez Mike's Bar{% endblock %}
 
 {% block content %}
-  {% if slug_focus %}
-    <div class="alert alert-info">Vue ciblée : <strong>{{ slug_focus }}</strong></div>
-  {% endif %}
+    <div class="alert alert-info">Vue ciblée : <strong>{{ becs }}</strong></div>
 
   <div class="row g-3" id="cards-grid">
     {% for b in becs %}
-      {% if show_all or slug_focus == b.slug %}
       <div class="col-12 col-md-6 col-lg-4" id="card-col-{{ b.slug }}">
         <div class="card h-100" data-slug="{{ b.slug }}">
           <div class="card-header d-flex justify-content-between align-items-center">
@@ -25,7 +22,7 @@
               <span class="badge bg-danger" id="state-{{ b.slug }}">Fermée</span>
             </div>
 
-            <div class="small text-muted">UID :</div>
+            <div class="small text-muted">Tag carte NFC :</div>
             <div class="mb-2"><code id="uid-{{ b.slug }}">—</code></div>
 
             <div class="d-flex align-items-center mb-2">
@@ -54,7 +51,6 @@
           </div>
         </div>
       </div>
-      {% endif %}
     {% empty %}
       <div class="col-12">
         <div class="alert alert-warning">Aucune tireuse définie.</div>
@@ -66,7 +62,6 @@
 {% block scripts %}
 <script>
 (function(){
-  const slugFocus = "{{ slug_focus }}";
   const cards = {};
 
   // Initialisation : On récupère les éléments HTML
