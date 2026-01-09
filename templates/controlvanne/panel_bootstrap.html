@@ -16,7 +16,7 @@
               <span class="badge bg-secondary me-2">{{ b.slug }}</span>
               <strong class="text-info" id="liquid-{{ b.slug }}">{{ b.liquid_label|default:"Liquide" }}</strong>
             </div>
-            <span class="badge bg-dark" id="agent-url-{{ b.slug }}">{{ b.agent_base_url|default:"(agent inconnu)" }}</span>
+            <span class="badge bg-dark" id="agent-url-{{ b.slug }}">{{ b.agent_base_url|default:"Display" }}</span>
           </div>
 
           <div class="card-body">
@@ -57,7 +57,7 @@
       {% endif %}
     {% empty %}
       <div class="col-12">
-        <div class="alert alert-warning">Aucune tireuse_bec définie.</div>
+        <div class="alert alert-warning">Aucune tireuse définie.</div>
       </div>
     {% endfor %}
   </div>
@@ -68,9 +68,12 @@
 (function(){
   const slugFocus = "{{ slug_focus }}";
   const cards = {};
+
+  // Initialisation : On récupère les éléments HTML
   document.querySelectorAll('.card[data-slug]').forEach(card => {
-    const s = card.dataset.slug;
+    const s = card.dataset.slug.toLowerCase(); // On force le minuscule
     cards[s] = {
+      slug: s,
       uid: document.getElementById('uid-'+s),
       auth: document.getElementById('auth-'+s),
       state: document.getElementById('state-'+s),
@@ -79,102 +82,132 @@
       vol: document.getElementById('vol-'+s),
       msg: document.getElementById('msg-'+s),
       liquid: document.getElementById('liquid-'+s),
-      agent: document.getElementById('agent-url-'+s),
+      container: card // Utile pour debugging visuel eventuel
     };
   });
 
-  function clamp(n, min, max){ return Math.max(min, Math.min(max, n)); }
+  // Fonction de Remise à Zéro (Mode gris)
+  function resetCardUI(c) {
+    if(!c) return;
+    c.uid.innerHTML = '&mdash;';
+
+    // On force le badge en GRIS
+    c.auth.className = 'badge bg-secondary';
+    c.auth.textContent = 'En attente';
+
+    // Reset Vanne et Volumes
+    c.state.className = 'badge bg-danger';
+    c.state.textContent = 'Fermée';
+    c.flow.textContent = '0.00';
+    c.flowbar.style.width = '0%';
+    c.vol.textContent = '0';
+    c.msg.textContent = 'Posez votre badge...';
+  }
+
+  // Helper Couleurs
   function setBadge(el, ok){
-    el.classList.remove('bg-secondary','bg-danger','bg-success','bg-warning','bg-info','bg-dark');
-    el.classList.add(ok ? 'bg-success' : 'bg-danger');
+    el.className = 'badge ' + (ok ? 'bg-success' : 'bg-danger');
     el.textContent = ok ? 'Autorisé' : 'Refusé';
   }
-  function setVanne(el, ouverte){
-    el.classList.remove('bg-danger','bg-success');
-    el.classList.add(ouverte ? 'bg-success' : 'bg-danger');
-    el.textContent = ouverte ? 'Ouverte' : 'Fermée';
-  }
-  const endTimers = {}; // slug -> timeoutId
-  function clearEndTimer(slug){
-  if (endTimers[slug]) { clearTimeout(endTimers[slug]); delete endTimers[slug]; }
-  }
 
-  // WS abonne groupe ALL + au groupe ciblé (si slugFocus)
+  // --- WEBSOCKET ---
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-  const sockets = [];
-  function openWS(path){
-    const ws = new WebSocket(`${proto}://${location.host}${path}`);
-    ws.onopen = () => console.log('WS open', path);
-    ws.onclose = () => console.warn('WS close', path);
-    ws.onerror = e => console.error('WS error', path, e);
-    ws.onmessage = ev => {
+
+  // Connexion au canal demandé (ou "all" par défaut)
+  const slugFocus = "{{ slug_focus }}";
+  const wsPath = (!slugFocus || slugFocus === 'all') ? '/ws/rfid/all/' : `/ws/rfid/${slugFocus}/`;
+
+  const ws = new WebSocket(`${proto}://${location.host}${wsPath}`);
+
+  ws.onopen = () => console.log("WS Connecté sur", wsPath);
+
+  ws.onmessage = ev => {
       try {
           const data = JSON.parse(ev.data);
-          const payload = data.payload || data; // selon consumer
-          const slug = (payload.tireuse_bec || '').toLowerCase();
-          const c = cards[slug];
-          if (!c) return;
-          // Presence carte
-          if (payload.present) {
-            clearEndTimer(slug);
-            c.uid.textContent = payload.uid || '—';
-            setBadge(c.auth, !!payload.authorized);
-            setVanne(c.state, !!payload.vanne_ouverte);
-            c.flow.textContent = (payload.debit_l_min || 0).toFixed(2);
-            c.flowbar.style.width = clamp((payload.debit_l_min || 0) * 10, 0, 100) + '%'; // échelle simple
-            c.vol.textContent = (payload.volume_ml || 0).toFixed(0);
-            c.msg.textContent = payload.message || '';
-            if (payload.liquid_label) c.liquid.textContent = payload.liquid_label;
-            if (payload.agent_base_url) c.agent.textContent = payload.agent_base_url;
-            return;
+          const payload = data.payload || data;
+
+          // Identification de la cible
+          // Le Pi envoie peut-être "tireuse1" ou "Tireuse1", on normalise en minuscule
+          const targetSlug = (payload.tireuse_bec || '').toLowerCase();
+
+          // On cherche quelles cartes mettre à jour sur l'écran
+          let targets = [];
+          if (targetSlug === 'all') {
+             targets = Object.values(cards); // Tout le mur
+          } else if (cards[targetSlug]) {
+             targets = [cards[targetSlug]]; // Une seule carte
+          } else if (slugFocus === 'all') {
+             // Si on est sur le mur ALL mais qu'on ne trouve pas la carte, on ignore ou on log
+             console.warn("Reçu event pour", targetSlug, "mais pas de carte HTML trouvée.");
+             return;
           }
-          // Fin de session
-          if (payload.session_done) {
-            clearEndTimer(slug);
-            // figer l'affichage de fin de session
-            setBadge(c.auth, false);
-            setVanne(c.state, false);
-            c.flow.textContent = '0.00';
-            c.flowbar.style.width = '0%';
-            // Affiche volume de la session + solde
-            const volSession = (payload.session_volume_ml || 0).toFixed(0);
-            const balanceTxt = (payload.balance != null) ? ` | Solde: ${payload.balance}` : '';
-            c.vol.textContent = volSession; // affiche volume de la session
-            c.msg.textContent = (payload.message || 'Session terminée') + balanceTxt;
 
-            // après 10 s → retour à “idle”
-            endTimers[slug] = setTimeout(() => {
-             setBadge(c.auth, false);
-             setVanne(c.state, false);
-             c.flow.textContent = '0.00';
-             c.flowbar.style.width = '0%';
-             c.vol.textContent = '0';
-             c.msg.textContent = 'En attente carte…';
-             clearEndTimer(slug);
-            }, 10000);
-           return;
-          }
-          // cas "pas de carte / idle" sans session_done (ex: boot/reset)
-          setBadge(c.auth, false);
-          setVanne(c.state, false);
-          c.flow.textContent = '0.00';
-          c.flowbar.style.width = '0%';
-          c.msg.textContent = p.message || 'En attente carte…';
+          targets.forEach(c => {
 
-      } catch(e){ console.error('WS parse', e); }
-    };
-    sockets.push(ws);
-  }
+              // -------------------------------------------------
+              // CAS 1 : Carte présente sur le lecteur
+              // -------------------------------------------------
+              if (payload.present) {
+                  c.uid.textContent = payload.uid || 'Lu...';
 
-  // Routes Channels
-      if (!slugFocus || slugFocus === 'all') {
-    // mode “mur” → on écoute rfid_state.all
-    openWS('/ws/rfid/all/');
-      }
-      else {
-          // mode ciblé → on écoute uniquement le slug
-          openWS(`/ws/rfid/${encodeURIComponent(slugFocus)}/`);
-      }
+                  // Autorisation (Vert ou Rouge)
+                  if (typeof payload.authorized !== 'undefined') {
+                      setBadge(c.auth, payload.authorized);
+                  }
+
+                  // Vanne et Débit
+                  if (payload.vanne_ouverte) {
+                      c.state.className = 'badge bg-success';
+                      c.state.textContent = 'Ouverte';
+                  } else {
+                      c.state.className = 'badge bg-danger';
+                      c.state.textContent = 'Fermée';
+                  }
+
+                  c.flow.textContent = (payload.debit_l_min || 0).toFixed(2);
+                  const flowPct = Math.min((payload.debit_l_min || 0) * 10, 100);
+                  c.flowbar.style.width = flowPct + '%';
+                  c.vol.textContent = (payload.volume_ml || 0).toFixed(0);
+
+                  if (payload.message) c.msg.textContent = payload.message;
+                  return;
+              }
+
+              // -------------------------------------------------
+              // CAS 2 : Fin de session (avec un rapport final)
+              // -------------------------------------------------
+              if (payload.session_done) {
+                  // On fige l'affichage en Bleu pour dire "Fini"
+                  c.auth.className = 'badge bg-info text-dark';
+                  c.auth.textContent = 'Terminé';
+                  c.state.className = 'badge bg-danger';
+                  c.state.textContent = 'Fermée';
+
+                  c.vol.textContent = (payload.session_volume_ml || 0).toFixed(0);
+                  if (payload.message) c.msg.textContent = payload.message;
+
+                  // On efface tout après 4 secondes
+                  setTimeout(() => resetCardUI(c), 4000);
+                  return;
+              }
+
+              // -------------------------------------------------
+              // CAS 3 : RETRAIT DE CARTE / PAS DE SESSION
+              // -------------------------------------------------
+              // Si on arrive ici, c'est que present=false et session_done=false.
+              // C'est le cas : "J'ai retiré la carte sans verser" OU "Carte inconnue retirée".
+              // ACTION : On efface tout, tout de suite.
+
+              resetCardUI(c);
+              if (payload.message) c.msg.textContent = payload.message;
+          });
+
+      } catch(e) { console.error("Erreur WS JS:", e); }
+  };
 })();
 </script>
+
+
+
+
 {% endblock %}

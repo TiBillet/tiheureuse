@@ -1,4 +1,7 @@
 .venv
+venv/
+db.sqlite3
+staticfiles/
 .idea
 .vscode/
 .DS_Store
@@ -16,3 +19,4 @@ build/
 **/migrations/*
 !**/migrations/__init__.py
 bash_install.txt
+/Pi/first/

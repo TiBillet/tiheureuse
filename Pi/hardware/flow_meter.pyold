@@ -1,0 +1,109 @@
+import time
+import gpiod
+from threading import Thread
+from utils.logger import logger
+from config.settings import FLOW_GPIO_PIN, FLOW_CALIBRATION_FACTOR
+from utils.exceptions import FlowMeterError
+
+class FlowMeter:
+    def __init__(self, pin: int = FLOW_GPIO_PIN, calibration_factor: float = FLOW_CALIBRATION_FACTOR, gpio_chip: int = 0, inverted: bool = False):
+        self.pin = pin
+        self.calibration_factor = calibration_factor
+        self.gpio_chip = gpio_chip
+        self.inverted = inverted
+        self.pulse_count = 0
+        self.flow_rate = 0.0
+        self.total_volume = 0.0
+        self.measuring = False
+        self.thread = None
+        self.last_time = time.time()
+        self.chip = None
+        self.line = None
+        self.initialize()
+
+    def initialize(self):
+        """Initialise le débitmètre avec détection de fronts montants."""
+        try:
+            self.chip = gpiod.Chip('gpiochip0')
+            self.line = self.chip.get_line(self.pin)
+            self.line.request(
+                consumer="tibeer-flow-meter",
+                type=gpiod.LINE_REQ_EV_RISING_EDGE,
+                flags=gpiod.LINE_REQ_FLAG_BIAS_PULL_UP
+            )
+            logger.info(f"Débitmètre initialisé sur GPIO{self.pin}")
+        except Exception as e:
+            self.cleanup()
+            logger.error(f"Erreur initialisation débitmètre: {e}")
+            raise FlowMeterError("Initialisation débitmètre échouée") from e
+
+    def _pulse_callback(self):
+        """Lit les événements de fronts montants (méthode d'instance)."""
+        while self.measuring:
+            try:
+                # Attend un événement (timeout 1s)
+                if self.line.event_wait(sec=1.0):
+                    self.line.event_read()  # Lit et réinitialise l'événement
+                    self.pulse_count += 1
+                    logger.debug(f"Pulse détecté (Total: {self.pulse_count})")
+            except Exception as e:
+                logger.error(f"Erreur lecture événement: {e}")
+                break
+
+    def start_measurement(self):
+        """Démarre la mesure du débit."""
+        if self.measuring:
+            logger.warning("Mesure déjà en cours")
+            return
+        self.measuring = True
+        self.pulse_count = 0
+        self.last_time = time.time()
+        self.thread = Thread(target=self._pulse_callback, daemon=True)
+        self.thread.start()
+        logger.info("Mesure du débit démarrée")
+
+    def stop_measurement(self) -> float:
+        """Arrête la mesure et retourne le volume total."""
+        if not self.measuring:
+            logger.warning("Aucune mesure en cours")
+            return 0.0
+        self.measuring = False
+        if self.thread:
+            self.thread.join(timeout=1.0)
+        volume = self.pulse_count / self.calibration_factor
+        self.total_volume += volume
+        logger.info(f"Mesure arrêtée. Volume: {volume:.2f}L (Total: {self.total_volume:.2f}L)")
+        return volume
+
+    def _calculate_flow(self):
+        """Calcule le débit en temps réel (optionnel, si besoin de L/min)."""
+        last_count = 0
+        while self.measuring:
+            time.sleep(1.0)
+            current_time = time.time()
+            elapsed = current_time - self.last_time
+            if elapsed >= 1.0:
+                pulses = self.pulse_count - last_count
+                self.flow_rate = (pulses / self.calibration_factor) * 60  # L/min
+                last_count = self.pulse_count
+                self.last_time = current_time
+                logger.debug(f"Débit: {self.flow_rate:.2f}L/min")
+
+    def reset_total(self):
+        """Remet à zéro le compteur total."""
+        self.total_volume = 0.0
+        logger.info("Compteur total réinitialisé")
+
+    def cleanup(self):
+        """Nettoie les ressources GPIO."""
+        if hasattr(self, 'line') and self.line:
+            try:
+                self.line.release()
+            except Exception as e:
+                logger.error(f"Erreur libération ligne GPIO: {e}")
+        if hasattr(self, 'chip') and self.chip:
+            try:
+                self.chip.close()
+            except Exception as e:
+                logger.error(f"Erreur fermeture chip GPIO: {e}")
+        logger.info("Débitmètre nettoyé")

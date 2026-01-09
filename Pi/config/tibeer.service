@@ -1,22 +1,17 @@
 [Unit]
-Description=TiBeer Agent - Contrôleur de tireuse connectée
-After=network.target network-online.target
-Wants=network-online.target
+Description=Agent RFID + Vanne (tibeer)
+After=network-online.target pigpiod.service
+Wants=network-online.target pigpiod.service
+Requires=pigpiod.service
 
 [Service]
-Type=notify
+Type=simple
 User=sysop
-Group=sysop
-WorkingDirectory=/home/sysop/tibeer
-EnvironmentFile=/home/sysop/.env
-ExecStart=/usr/bin/python3 /home/sysop/tibeer/main.py
+WorkingDirectory=/home/sysop
+EnvironmentFile=-/etc/default/tibeer.env
+ExecStart=/home/sysop/tibeer/venv/bin/python /home/sysop/tibeer/main.py
 Restart=always
-RestartSec=5s
-NotifyAccess=all
-
-# Permissions pour GPIO et devices
-DeviceAllow=/dev/gpiomem rw
-DeviceAllow=/dev/ttyS0 rw
+RestartSec=2
 
 [Install]
 WantedBy=multi-user.target

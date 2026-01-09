@@ -1,102 +1,99 @@
 import time
-import RPi.GPIO as GPIO
-from threading import Thread
+import pigpio
+import os
 from utils.logger import logger
-from config.settings import FLOW_GPIO_PIN, FLOW_CALIBRATION_FACTOR
-from utils.exceptions import FlowMeterError
 
 class FlowMeter:
     """
-    Mesure le débit de bière via un capteur à impulsions.
-    Features :
-    - Calibration configurable (impulsions par litre)
-    - Mesure en temps réel avec thread dédié
-    - Détection des fuites (débit anormal)
+    Gestion du débitmètre via pigpio (interruptions précises).
+    Calcule le volume total et le débit instantané.
     """
-
-    def __init__(self, pin: int = FLOW_GPIO_PIN, calibration_factor: float = FLOW_CALIBRATION_FACTOR):
-        self.pin = pin
-        self.calibration_factor = calibration_factor  # Impulsions par litre
-        self.pulse_count = 0
-        self.flow_rate = 0.0  # L/min
-        self.total_volume = 0.0  # Litres totaux
-        self.measuring = False
-        self.thread = None
-        self.last_time = time.time()
-
-    def initialize(self) -> bool:
-        """Initialise le GPIO pour le débitmètre."""
+    def __init__(self):
+        # Configuration depuis variables d'env (comme l'original)
+        self.gpio_pin = int(os.getenv("GPIO_FLOW_SENSOR", "23"))
         try:
-            GPIO.setmode(GPIO.BCM)
-            GPIO.setup(self.pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
-            GPIO.add_event_detect(
-                self.pin,
-                GPIO.FALLING,
-                callback=self._pulse_callback,
-                bouncetime=20  # Anti-rebond matériel (ms)
-            )
-            logger.info(f"Débitmètre initialisé sur GPIO{self.pin} (Calibration: {self.calibration_factor} imp/L)")
-            return True
-        except Exception as e:
-            logger.error(f"Erreur initialisation débitmètre: {e}")
-            raise FlowMeterError("Impossible d'initialiser le débitmètre") from e
+            self.calibration_factor = float(os.getenv("FLOW_CALIBRATION_FACTOR", "6.5"))
+        except ValueError:
+            self.calibration_factor = 6.5
 
-    def _pulse_callback(self, channel):
-        """Callback appelée à chaque impulsion (thread-safe)."""
-        if not self.measuring:
-            return
-        self.pulse_count += 1
+        self.pi = pigpio.pi()
+        if not self.pi.connected:
+            logger.error("Pigpio non connecté ! Le débitmètre ne fonctionnera pas.")
+            logger.error("Avez-vous lancé 'sudo pigpiod' ?")
+            raise Exception("Pigpio connection failed")
 
-    def start_measurement(self):
-        """Démarre la mesure du débit."""
-        if self.measuring:
-            logger.warning("Mesure déjà en cours")
-            return
+        # Config GPIO
+        self.pi.set_mode(self.gpio_pin, pigpio.INPUT)
+        self.pi.set_pull_up_down(self.gpio_pin, pigpio.PUD_UP)
 
-        self.measuring = True
-        self.pulse_count = 0
+        # Variables internes
+        self.flow_count = 0
+        self.total_pulses = 0
+        self.volume_total_ml = 0.0
         self.last_time = time.time()
-        self.thread = Thread(target=self._calculate_flow, daemon=True)
-        self.thread.start()
-        logger.info("Mesure du débit démarrée")
+        self.current_flow_rate = 0.0 # L/min
 
-    def stop_measurement(self) -> float:
-        """Arrête la mesure et retourne le volume total."""
-        if not self.measuring:
-            logger.warning("Aucune mesure en cours")
-            return 0.0
+        # Callback (Interruption)
+        self.cb = self.pi.callback(self.gpio_pin, pigpio.FALLING_EDGE, self._callback)
+        logger.info(f"Débitmètre initialisé sur GPIO {self.gpio_pin}")
 
-        self.measuring = False
-        if self.thread:
-            self.thread.join(timeout=1.0)
+    def _callback(self, gpio, level, tick):
+        """Appelé à chaque impulsion du capteur."""
+        self.flow_count += 1
+        self.total_pulses += 1
 
-        # Calcule le volume total
-        volume = self.pulse_count / self.calibration_factor
-        self.total_volume += volume
-        logger.info(f"Mesure arrêtée. Volume: {volume:.2f}L (Total: {self.total_volume:.2f}L)")
-        return volume
+    def update(self):
+        """
+        À appeler régulièrement (ex: toutes les secondes) pour mettre à jour
+        le débit instantané (L/min) et le volume cumulé.
+        """
+        now = time.time()
+        delta_t = now - self.last_time
+        
+        # On met à jour si plus de 0.5s s'est écoulé pour lisser
+        if delta_t > 0.5:
+            # Fréquence en Hz
+            freq = self.flow_count / delta_t
+            
+            # Calcul débit L/min = (Hz / facteur) * 60
+            self.current_flow_rate = (freq / self.calibration_factor) * 60 if freq > 0 else 0
+            
+            # Ajout au volume total (L) converti en ml
+            # Volume ce cycle = (Débit L/min / 60) * delta_t_sec * 1000
+            vol_added = (self.current_flow_rate / 60) * delta_t * 1000
+            self.volume_total_ml += vol_added
 
-    def _calculate_flow(self):
-        """Calcule le débit en temps réel (thread dédié)."""
-        last_count = 0
-        while self.measuring:
-            time.sleep(1.0)  # Met à jour toutes les secondes
-            current_time = time.time()
-            elapsed = current_time - self.last_time
+            # Reset compteurs intermédiaires
+            self.flow_count = 0
+            self.last_time = now
+            
+            return self.current_flow_rate
+        return self.current_flow_rate
+    def volume_l(self):
+        """
+        Fonction requise par TibeerController.
+        Retourne le volume total en Litres.
+        Formule: 1 L = (Facteur * 60) impulsions.
+        """
+        pulses_per_liter = self.calibration_factor * 60
+        if pulses_per_liter == 0: return 0.0
+        return self.total_pulses / pulses_per_liter
 
-            if elapsed >= 1.0:  # Met à jour toutes les secondes
-                pulses = self.pulse_count - last_count
-                self.flow_rate = (pulses / self.calibration_factor) * 60  # L/min
-                last_count = self.pulse_count
-                self.last_time = current_time
-                logger.debug(f"Débit: {self.flow_rate:.2f}L/min")
 
-    def reset_total(self):
-        """Remet à zéro le compteur total."""
-        self.total_volume = 0.0
-        logger.info("Compteur total réinitialisé")
+    def get_volume_ml(self):
+        return self.volume_total_ml
+    
+    def get_flow_rate(self):
+        return self.current_flow_rate
+
+    def reset(self):
+        self.flow_count = 0
+        self.total_pulses = 0
+        self.current_flow_rate = 0.0
+        self.last_time = time.time()
 
     def cleanup(self):
-        """Nettoie les ressources."""
-        GPIO.remove_event_detect(self.pin)
-        logger.info("Débitmètre nettoyé")
+        if self.cb:
+            self.cb.cancel()
+        # Note: on ne stop pas self.pi ici car partagé avec Valve si besoin, 
+        # ou géré globalement.

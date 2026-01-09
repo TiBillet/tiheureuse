@@ -10,8 +10,8 @@ def setup_logger(name: str = "tibeer") -> logging.Logger:
     - Format standardisé
     """
     logger = logging.getLogger(name)
-    logger.setLevel(logging.INFO)  # Niveau par défaut
-
+   # logger.setLevel(logging.INFO)  # Niveau par défaut
+    logger.setLevel(logging.DEBUG)
     # Format des logs
     formatter = logging.Formatter(
         '%(asctime)s - %(name)s - %(levelname)s - %(message)s'

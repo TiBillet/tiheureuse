@@ -1,0 +1,116 @@
+import os
+import time
+import logging
+import lgpio
+from dotenv import load_dotenv
+from mfrc522 import SimpleMFRC522
+from mfrc522 import MFRC522
+from utils.logger import logger
+from utils.serial_tools import SerialReader  # Pour VMA405
+
+# Charge les variables d'environnement
+load_dotenv()
+
+class RFIDReader:
+    def __init__(self, device: str = None, timeout: float = None):
+        # Récupération des variables d'environnement (avec nettoyage)
+        self.rfid_type = os.getenv("RFID_TYPE", "RC522").strip().upper()  # Nettoie les espaces
+        self.device = device or os.getenv("RFID_DEVICE", "/dev/ttyS0")
+        self.timeout = float(timeout or os.getenv("RFID_TIMEOUT", "1.0"))
+        self.gpio_mode = os.getenv("GPIO_MODE", "BOARD").strip().upper()
+
+        # Initialisation
+        self.last_tag = None
+        self.last_read_time = 0
+        self.debounce_delay = 0.5
+        self.callback = None
+        self.reader = None
+        self.serial_conn = None
+
+        # Validation du type RFID
+        if self.rfid_type not in ["RC522", "VMA405"]:
+            raise ValueError(f"Type RFID invalide: '{self.rfid_type}'. Utilisez RC522 ou VMA405.")
+
+        # Initialisation spécifique
+        self._init_hardware()
+
+    def initialize(self) -> bool:
+        """Initialise le lecteur RFID (idempotent)."""
+        try:
+            if self.rfid_type == "RC522":
+                self._init_rc522()
+            elif self.rfid_type == "VMA405":
+                self._init_vma405()
+            logger.info(f"Lecteur {self.rfid_type} initialisé avec succès")
+            return True
+        except Exception as e:
+            logger.error(f"Échec initialisation {self.rfid_type}: {e}")
+            raise
+
+    def _init_hardware(self):
+        """Initialise le matériel selon le type RFID."""
+        # Initialisation de lgpio
+        try:
+            if self.rfid_type == "RC522":
+                self._init_rc522()
+            elif self.rfid_type == "VMA405":
+                self._init_vma405()
+        except Exception as e:
+            logger.error(f"Échec initialisation {self.rfid_type}: {e}", exc_info=True)
+            raise
+
+    def _init_rc522(self):
+        try:
+            rst_pin = int(os.getenv("RC522_RST_PIN", 22))
+            self.reader = SimpleMFRC522()
+            logger.info(f"Lecteur RC522 initialisé (RST=GPIO{rst_pin}, SPI CE0)")
+
+        except ImportError:
+            logger.error("Bibliothèque mfrc522 manquante. Installez-la avec : pip install mfrc522")
+            raise
+        except Exception as e:
+            logger.error(f"Erreur initialisation RC522: {e}")
+            raise
+
+    def _init_vma405(self):
+        """Initialise le lecteur VMA405 (port série)."""
+        try:
+            self.serial_conn = SerialReader(
+                port=self.device,
+                baudrate=9600,
+                timeout=self.timeout
+            )
+            logger.info(f"Lecteur VMA405 initialisé sur {self.device}.")
+        except Exception as e:
+            logger.error(f"Erreur initialisation VMA405: {e}", exc_info=True)
+            raise
+
+    def read_tag(self):
+        """Lit un tag RFID selon le type de lecteur."""
+        try:
+            if self.rfid_type == "RC522":
+                uid, _ = self.reader.read()
+                logger.debug(f"Tag RC522 lu: UID={uid}")
+                return str(uid)
+            elif self.rfid_type == "VMA405":
+                uid = self.serial_conn.read_line().strip()
+                if uid:
+                    logger.debug(f"Tag VMA405 lu: UID={uid}")
+                    return uid
+                return None
+        except Exception as e:
+            logger.error(f"Erreur lecture {self.rfid_type}: {e}", exc_info=True)
+            return None
+
+    def cleanup(self):
+        if hasattr(self, 'line') and self.line:
+            try:
+                self.line.release()
+            except Exception as e:
+                logger.error(f"Erreur libération ligne GPIO: {e}")
+        if hasattr(self, 'chip') and self.chip:
+            try:
+                self.chip.close()
+            except Exception as e:
+                logger.error(f"Erreur fermeture chip GPIO: {e}")
+        logger.info("RFID nettoyé")

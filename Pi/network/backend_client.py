@@ -1,100 +1,88 @@
 import requests
-import time
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
+import json
+import os
 from utils.logger import logger
-from config.settings import BACKEND_URL, NETWORK_TIMEOUT, MAX_RETRIES
-from utils.exceptions import BackendError
+
+# --- CONFIGURATION ---
+BACKEND_URL_BASE = os.getenv("BACKEND_URL", "http://192.168.1.10:8000/api/rfid") 
+BACKEND_API_KEY = os.getenv("BACKEND_API_KEY", "changeme")
+TIREUSE = os.getenv("TIREUSE")
+TIMEOUT = 2.0
 
 class BackendClient:
-    """
-    Client pour communiquer avec le backend Django.
-    Features :
-    - Retries automatiques en cas d'échec
-    - Timeout configurable
-    - Gestion des erreurs réseau
-    - Mise en file d'attente des événements en cas de déconnexion
-    """
+    def __init__(self, tireuse_id=TIREUSE):
+        self.headers = {
+            "Content-Type": "application/json",
+            "X-API-Key": BACKEND_API_KEY
+        }
+        self.base_url = BACKEND_URL_BASE.rstrip("/")
+        self.tireuse_id = tireuse_id
 
-    def __init__(self):
-        self.session = requests.Session()
-        self.retry_strategy = Retry(
-            total=MAX_RETRIES,
-            backoff_factor=1,
-            status_forcelist=[408, 429, 500, 502, 503, 504],
-            allowed_methods=["POST"]
-        )
-        self.adapter = HTTPAdapter(max_retries=self.retry_strategy)
-        self.session.mount("http://", self.adapter)
-        self.queue = []  # File d'attente pour les événements non envoyés
+    def authorize(self, uid: str) -> dict:
+        """
+        Interroge seulement Django. 
+        Renvoie un dictionnaire avec 'authorized': True/False et le reste des infos.
+        """
+        url = f"{self.base_url}/authorize"
+        payload = {"uid": uid, "tireuse_id": self.tireuse_id}
+        
+        try:
+            logger.debug(f"Demande autorisation pour {uid}...")
+            r = requests.post(url, json=payload, headers=self.headers, timeout=TIMEOUT)
+            
+            if r.status_code == 200:
+                data = r.json()
+                if isinstance(data, dict):
+                    # Si le serveur dit OK ou renvoie une session
+                    if "session_id" in data or data.get("authorized") is True:
+                        data["authorized"] = True 
+                        return data
+                return {"authorized": False, "error": "Pas de session_id"}
 
-    def send_event(self, event_type: str, tag_id: str, data: dict) -> bool:
+            elif r.status_code == 403:
+                # On retourne juste l'info, c'est le Controller qui décidera de l'affichage
+                return {"authorized": False, "error": "Badge refusé ou solde insuffisant"}
+
+            else:
+                return {"authorized": False, "error": f"Erreur HTTP {r.status_code}"}
+                
+        except Exception as e:
+            logger.error(f"Erreur réseau authorize: {e}")
+            return {"authorized": False, "error": "Erreur Réseau"}
+
+    def send_event(self, event_type, uid, session_id=None, data=None):
         """
-        Envoie un événement au backend.
-        Args:
-            event_type: Type d'événement (ex: "pour_start", "pour_end")
-            tag_id: UID du tag RFID
-            data: Données supplémentaires (ex: {"volume": 0.5})
-        Returns:
-            bool: True si succès, False si échec (l'événement est mis en file)
+        Envoie un événement (start, update, end, auth_fail).
         """
+        # 1. Préparation des données data/inner
+        inner_data = {}
+        
+        if session_id:
+            inner_data["session_id"] = session_id
+            
+        if data is not None:
+            if isinstance(data, dict):
+                inner_data.update(data)
+            else:
+                inner_data["volume_ml"] = data
+
+        # 2. Payload complet
         payload = {
             "event_type": event_type,
-            "tag_id": tag_id,
-            "data": data,
-            "timestamp": int(time.time())
+            "uid": uid,
+            "tireuse_bec": self.tireuse_id,
+            "data": inner_data
         }
 
         try:
-            response = self.session.post(
-                BACKEND_URL,
-                json=payload,
-                timeout=NETWORK_TIMEOUT
-            )
-            response.raise_for_status()
-            logger.info(f"Événement envoyé: {event_type} (Tag: {tag_id})")
-            return True
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Échec envoi événement {event_type}: {e}")
-            self.queue.append(payload)  # Met en file d'attente
-            return False
-
-    def flush_queue(self) -> int:
-        """Tente d'envoyer tous les événements en file d'attente."""
-        if not self.queue:
-            return 0
-
-        success_count = 0
-        failed_events = []
-
-        for event in self.queue:
-            try:
-                response = self.session.post(
-                    BACKEND_URL,
-                    json=event,
-                    timeout=NETWORK_TIMEOUT
-                )
-                response.raise_for_status()
-                success_count += 1
-                logger.info(f"Événement en file envoyé: {event['event_type']}")
-            except requests.exceptions.RequestException as e:
-                logger.error(f"Échec envoi événement en file: {e}")
-                failed_events.append(event)
-
-        self.queue = failed_events  # Conserve les événements non envoyés
-        logger.info(f"{success_count}/{len(self.queue) + success_count} événements envoyés")
-        return success_count
-
-    def test_connection(self) -> bool:
-        """Teste la connectivité avec le backend."""
-        try:
-            response = self.session.get(
-                f"{BACKEND_URL.rstrip('/')}/ping",
-                timeout=NETWORK_TIMEOUT
-            )
-            response.raise_for_status()
-            logger.info("Connexion au backend OK")
-            return True
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Test connexion échoué: {e}")
-            return False
+            # Timeout court pour le débit, un peu plus long pour les autres events
+            to = 1.0 if event_type == "pour_update" else 3.0
+            
+            url = f"{self.base_url}/event/"
+            res = requests.post(url, json=payload, headers=self.headers, timeout=to)
+            
+            if res.status_code != 200:
+                logger.error(f"Erreur API Event ({res.status_code}): {res.text}")
+                
+        except Exception as e:
+            logger.error(f"Echec envoi event {event_type}: {e}")
