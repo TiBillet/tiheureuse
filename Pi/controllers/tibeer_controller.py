@@ -1,6 +1,7 @@
 import time
 import sys
 import threading
+import os
 from hardware.rfid_reader import RFIDReader
 from hardware.valve import Valve
 from hardware.flow_meter import FlowMeter
@@ -17,8 +18,7 @@ class TibeerController:
         self.rfid = RFIDReader()
         self.valve = Valve()  
         self.flow_meter = FlowMeter()
-        self.client = BackendClient(tireuse_id="narval") # On spécifie l'ID
-        
+        self.client = BackendClient(tireuse_id=os.getenv("TIREUSE_BEC", "LeBar"))
         # État du système
         self.current_uid = None     
         self.last_seen_ts = 0       

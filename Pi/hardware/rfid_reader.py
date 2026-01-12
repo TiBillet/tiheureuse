@@ -77,8 +77,7 @@ class RFIDReader:
                     # Nettoyage classique (hex string ou ascii selon le tag)
                     # VMA405 renvoie souvent du texte Hexa directement
                     uid_str = data.decode('utf-8').strip()
-                    # Si besoin de conversion hex spécifique, adapter ici.
-                    # Pour l'instant on retourne l'ID brut nettoyé.
+                    # on retourne l'ID brut nettoyé.
                     return uid_str
             except Exception as e:
                 logger.error(f"Erreur lecture VMA405: {e}")
@@ -95,7 +94,6 @@ class RFIDReader:
         # RC522 renvoie souvent 5 octets (4 octets UID + 1 octet Checksum)
         if len(uid) == 5:
             # On vérifie si c'est bien le checksum (XOR des 4 premiers)
-            # Mais par simplicité, on garde juste les 4 premiers qui sont l'ID.
             uid = uid[:4]
             
         # Formatage Hex Majuscule
@@ -108,17 +106,4 @@ class RFIDReader:
         # MFRC522 gère son propre SPI, pas de cleanup critique nécessaire ici
         logger.info("Lecteur RFID nettoyé")
 
-# Bloc de test autonome (à exécuter avec: python hardware/rfid_reader.py)
-if __name__ == "__main__":
-    print("Test du lecteur RFID... (Ctrl+C pour quitter)")
-    rfid = RFIDReader()
-    try:
-        while True:
-            tag = rfid.read_uid()
-            if tag:
-                print(f"TAG DÉTECTÉ: {tag}")
-                time.sleep(1) # Pause après détection pour éviter lecture multiple
-            time.sleep(0.1)
-    except KeyboardInterrupt:
-        print("\nArrêt du test.")
-        rfid.cleanup()
+

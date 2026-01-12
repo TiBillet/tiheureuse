@@ -35,7 +35,7 @@ touch "$PROFILE_DIR/First Run"
 while true; do
   "$CHROMIUM_BIN" \
     --user-data-dir="$PROFILE_DIR" \
-    --force-device-scale-factor=2.0 \
+    --force-device-scale-factor=1.5 \
     --lang=fr --accept-lang=fr-FR,fr \
     --no-first-run --no-default-browser-check \
     --kiosk "$URL" --incognito --start-fullscreen \

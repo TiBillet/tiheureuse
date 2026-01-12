@@ -12,11 +12,6 @@ current_state = {
     "balance": "0.00"
 }
 
-# @app.route('/')
-# def index():
-#     # Assurez-vous d'avoir un fichier templates/index.html
-#     return render_template('index.html', state=current_state)
-
 @app.route('/status')
 def status():
     """ Cette route sera appelée par le Javascript de la page pour rafraichir sans recharger """

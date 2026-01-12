@@ -9,7 +9,7 @@ class FlowMeter:
     Calcule le volume total et le débit instantané.
     """
     def __init__(self):
-        # Configuration depuis variables d'env (comme l'original)
+        # Configuration depuis variables d'env
         self.gpio_pin = int(os.getenv("GPIO_FLOW_SENSOR", "23"))
         try:
             self.calibration_factor = float(os.getenv("FLOW_CALIBRATION_FACTOR", "6.5"))
@@ -96,4 +96,4 @@ class FlowMeter:
         if self.cb:
             self.cb.cancel()
         # Note: on ne stop pas self.pi ici car partagé avec Valve si besoin, 
-        # ou géré globalement.
+

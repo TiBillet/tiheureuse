@@ -2,8 +2,7 @@
 set -e
 
 # ==========================================
-# INSTALLATION TIBEER - VERSION ULTIME
-# (Fusion: Structure modulaire + Display Legacy Robuste)
+#         INSTALLATION TIBEER
 # ==========================================
 
 # Vérification que le script n'est PAS lancé en root
@@ -23,33 +22,29 @@ echo "---------------------------------------"
 # ÉTAPE 1 : Configuration initiale
 # ==========================================
 echo "[1/10] 📝 Configuration des variables"
+# ==========================================
+# CONFIGURATION PAR DÉFAUT (POUR TESTS)
+# ==========================================
+DEFAULT_DJANGO_SERVER="http://192.168.1.10:8000"
+DEFAULT_GIT_REPO="git@github.com:TiBillet/tiheureuse.git"
+DEFAULT_GIT_BRANCH="master"
+DEFAULT_TIREUSE_ID="Le_Bilboquet"
 
-read -p "🔹 Adresse IP du serveur Django (ex: http://192.168.1.10:8000) : " DJANGO_SERVER
+# --- Demande Django ---
+echo "🔹 Adresse IP du serveur Django"
+read -p "   (Défaut: $DEFAULT_DJANGO_SERVER) : " DJANGO_SERVER
+# Si la variable est vide, on prend la valeur par défaut
+DJANGO_SERVER=${DJANGO_SERVER:-$DEFAULT_DJANGO_SERVER}
 # Nettoyage du slash de fin
 DJANGO_SERVER=${DJANGO_SERVER%/}
+echo "   -> Utilisation de : $DJANGO_SERVER"
 
-read -p "🔹 Nom de la tireuse (slug, ex: narval) : " TIREUSE_BEC
-
-echo ""
-echo "--- Gestion Clé SSH pour GitHub ---"
-if [ ! -f ~/.ssh/id_rsa.pub ]; then
-    echo "Génération de la clé SSH..."
-    ssh-keygen -t rsa -b 4096 -f ~/.ssh/id_rsa -N "" -q
-fi
-
-echo "⚠️  AJOUTEZ CETTE CLÉ À VOTRE COMPTE GITHUB (Settings > SSH Keys) :"
-echo "---------------------------------------------------------------"
-cat ~/.ssh/id_rsa.pub
-echo "---------------------------------------------------------------"
-read -p "Appuyez sur [Entrée] une fois la clé ajoutée sur GitHub..." DUMMY
-
-read -p "🔹 Voulez-vous cloner le dépôt maintenant ? (o/n) : " DO_CLONE
-if [[ "$DO_CLONE" =~ ^[oO]$ ]]; then
-    read -p "🔹 URL SSH du dépôt (ex: git@github.com:user/repo.git) : " GIT_REPO
-fi
+# --- Demande Nom Tireuse ---
+read -p "🔹 Nom de la tireuse (slug) [Défaut: $DEFAULT_TIREUSE_ID] : " TIREUSE_BEC
+TIREUSE_BEC=${TIREUSE_BEC:-$DEFAULT_TIREUSE_ID}
 
 # ==========================================
-# ÉTAPE 2 : Système de base
+# ÉTAPE 1 : Système de base
 # ==========================================
 echo ""
 echo "[2/10] 📦 Installation des paquets système..."
@@ -67,6 +62,81 @@ sudo apt-get install -y --no-install-recommends \
 echo "   -> Configuration Locale FR..."
 sudo sed -i 's/^# *fr_FR.UTF-8 UTF-8/fr_FR.UTF-8 UTF-8/' /etc/locale.gen
 sudo locale-gen || true
+# ==========================================
+# ÉTAPE 2 : Preparation Github et clonnage
+# ==========================================
+echo ""
+echo "--- Gestion Clé SSH pour GitHub ---"
+if [ ! -f ~/.ssh/id_rsa.pub ]; then
+    echo "Génération de la clé SSH..."
+    ssh-keygen -t rsa -b 4096 -f ~/.ssh/id_rsa -N "" -q
+fi
+
+echo "⚠️  AJOUTEZ CETTE CLÉ À VOTRE COMPTE GITHUB (Settings > SSH Keys) :"
+echo "---------------------------------------------------------------"
+cat ~/.ssh/id_rsa.pub
+echo "---------------------------------------------------------------"
+read -p "Appuyez sur [Entrée] une fois la clé ajoutée sur GitHub..." DUMMY
+
+echo ""
+echo "--- Récupération du Code Source ---"
+read -p "🔹 Voulez-vous cloner le dépôt maintenant ? (o/n) [o] : " DO_CLONE
+DO_CLONE=${DO_CLONE:-o} # Par défaut 'o' si Entrée
+
+if [[ "$DO_CLONE" =~ ^[oO]$ ]]; then
+
+    # --- Saisie Repo avec défaut ---
+    read -p "🔹 URL SSH du dépôt [Défaut: $DEFAULT_GIT_REPO] : " GIT_REPO
+    GIT_REPO=${GIT_REPO:-$DEFAULT_GIT_REPO}
+
+    # --- Saisie Branche avec défaut ---
+    read -p "🔹 Quelle branche ? [Défaut: $DEFAULT_GIT_BRANCH] : " GIT_BRANCH
+    GIT_BRANCH=${GIT_BRANCH:-$DEFAULT_GIT_BRANCH}
+
+    echo "   -> Repo : $GIT_REPO"
+    echo "   -> Branche : $GIT_BRANCH"
+
+    # --- Procédure de clonage (via dossier temporaire pour extraire 'Pi') ---
+    TEMP_DIR="/tmp/tibeer_temp_clone"
+
+    # Nettoyage préalable
+    rm -rf "$TEMP_DIR"
+
+    # Backup si dossier cible non vide
+    if [ "$(ls -A $TARGET_DIR 2>/dev/null)" ]; then
+        echo "⚠️  Le dossier $TARGET_DIR n'est pas vide. Sauvegarde..."
+        mv "$TARGET_DIR" "${TARGET_DIR}_bak_$(date +%s)"
+        mkdir -p "$TARGET_DIR"
+    fi
+
+    echo "📥 Clonage temporaire..."
+    git clone -b "$GIT_BRANCH" "$GIT_REPO" "$TEMP_DIR"
+
+    if [ $? -ne 0 ]; then
+        echo "❌ Échec du clonage. Vérifiez vos clés SSH ou l'URL."
+        exit 1
+    fi
+
+    # Extraction du sous-dossier Pi
+    SOURCE_SUBDIR="$TEMP_DIR/Pi"
+
+    if [ -d "$SOURCE_SUBDIR" ]; then
+        echo "📂 Déplacement du contenu de 'Pi' vers $TARGET_DIR..."
+        cp -a "$SOURCE_SUBDIR/." "$TARGET_DIR/"
+        rm -rf "$TEMP_DIR"
+        echo "✅ Fichiers installés."
+    else
+        echo "❌ Erreur : Pas de dossier 'Pi' trouvé dans la branche $GIT_BRANCH."
+        rm -rf "$TEMP_DIR"
+        exit 1
+    fi
+
+else
+    mkdir -p "$TARGET_DIR"
+    echo "⚠️  Installation manuelle choisie."
+    echo "👉 Copiez vos fichiers dans $TARGET_DIR maintenant."
+    read -p "Appuyez sur [Entrée] pour continuer..."
+fi
 
 # ==========================================
 # ÉTAPE 3 : Configuration Boot & GPU (Méthode Legacy)
@@ -110,19 +180,6 @@ echo "needs_root_rights=yes" | sudo tee -a /etc/X11/Xwrapper.config >/dev/null
 # ==========================================
 echo ""
 echo "[5/10] 🐍 Installation de Tibeer (Python)..."
-
-mkdir -p "$TARGET_DIR"
-
-if [[ "$DO_CLONE" =~ ^[oO]$ ]]; then
-    if [ -d "$TARGET_DIR/.git" ]; then
-        echo "   -> Dossier git existant, backup..."
-        mv "$TARGET_DIR" "${TARGET_DIR}_bak_$(date +%s)"
-        mkdir -p "$TARGET_DIR"
-    fi
-    echo "   -> Clonage de $GIT_REPO..."
-    git clone "$GIT_REPO" "$TARGET_DIR"
-fi
-
 echo "   -> Configuration Environnement Virtuel..."
 cd "$TARGET_DIR"
 python3 -m venv venv
@@ -133,7 +190,7 @@ if [ -f "requirements.txt" ]; then
     pip install -r requirements.txt
 else
     echo "⚠️ Pas de requirements.txt, installation par défaut..."
-    pip install requests pigpio python-dotenv RPi.GPIO channels daphne
+ pip install pyserial flask requests pigpio mfrc522 RPi.GPIO spidev python-dotenv channels daphne
 fi
 deactivate
 
@@ -170,11 +227,21 @@ Section "ServerFlags"
     Option "OffTime"     "0"
 EndSection
 EOF
+# Desactivation de la traduction google
+sudo mkdir -p /etc/chromium/policies/managed
+sudo tee /etc/chromium/policies/managed/kiosk.json >/dev/null <<'JSON'
+{
+  "TranslateEnabled": false,
+  "DefaultBrowserSettingEnabled": false,
+  "BrowserAddPersonEnabled": false,
+  "SpellCheckEnabled": true
+}
+JSON
 
 # URL pour le Kiosk
 KIOSK_URL="$DJANGO_SERVER/?tireuse_bec=$TIREUSE_BEC"
 
-# Création du .xinitrc ROBUSTE (C'est ce qui manquait)
+# Création du .xinitrc
 cat << EOF > /home/$SYSUSER/.xinitrc
 #!/bin/bash
 exec > /home/$SYSUSER/.xinitrc.log 2>&1
@@ -242,7 +309,7 @@ Requires=pigpiod.service
 User=$SYSUSER
 WorkingDirectory=$TARGET_DIR
 EnvironmentFile=$TARGET_DIR/.env
-ExecStart=$TARGET_DIR/venv/bin/python $TARGET_DIR/tibeer_main.py
+ExecStart=$TARGET_DIR/venv/bin/python $TARGET_DIR/main.py
 Restart=always
 RestartSec=3
 StandardOutput=syslog
