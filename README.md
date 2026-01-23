@@ -35,27 +35,47 @@ Il gère l'authentification RFID, le contrôle des électrovannes, le comptage d
 
 Le code est modulaire pour faciliter la maintenance :
 
-/Pi
-├── main.py                    # Point d'entrée principal (Orchestrateur)
-├── controllers/
-│   ├── tibeer_controller.py   # Gestion de la detection des events carte (presence,retrait ...)
-├── hardware/
-│   ├── rfid_reader.py         # Gestion du lecteur RC522
-│   ├── valve.py               # Classe de gestion de l'électrovanne (sécurité intégrée)
-│   └── flow_meter.py          # Gestion des interruptions du débitmètre
-├── network/
-│   ├── backend_client.py      # Gestion de la communication avec le backend
-├── ui/
-│   ├── ui_server.py           # Gestion de l'affichage sur l'ecran
-├── utils/
-│   ├── exceptions.py          # Gestion des exceptions
-    ├── loger.py               # Gestion des logs
-    ├── exceptions.py          # Gestion des exceptions
-    ├── serial_tools.py        # Pour utilisation du port série (si utilisée VMA405)
-├── install.sh                 # Script d'installation automatique
-├── requirements.txt           # Dépendances Python
+home/sysop/Pi
 
-    Note : Le dépôt GitHub contient un dossier Pi. Le script d'installation se charge d'extraire ce contenu vers /home/sysop/tibeer sur la machine cible.
+`├── main.py                # Point d'entrée principal (Orchestrateur)`
+
+├── controllers/
+
+     tibeer_controller.py   # Gestion de la detection des events carte (presence,retrait ...)
+    
+├── hardware/
+
+     rfid_reader.py         # Gestion du lecteur RC522
+
+     valve.py               # Classe de gestion de l'électrovanne (sécurité intégrée)
+
+     flow_meter.py          # Gestion des interruptions du débitmètre
+
+├── network/
+
+     backend_client.py      # Gestion de la communication avec le backend
+
+├── ui/
+
+     ui_server.py           # Gestion de l'affichage sur l'ecran
+
+├── utils/
+
+     exceptions.py          # Gestion des exceptions
+
+     loger.py               # Gestion des logs
+    
+     exceptions.py          # Gestion des exceptions
+    
+     serial_tools.py        # Pour utilisation du port série (si utilisée VMA405)
+    
+`├── install.sh              # Script d'installation automatique`
+
+`├── requirements.txt        # Dépendances Python`
+
+
+    Note : Le dépôt GitHub contient un dossier Pi.
+    Le script d'installation se charge d'extraire ce contenu vers /home/sysop/tibeer sur la machine cible.
 
 ⚙️ Installation
 1. Préparation du Raspberry Pi
