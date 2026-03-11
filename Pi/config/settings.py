@@ -3,12 +3,10 @@ from dotenv import load_dotenv
 from pathlib import Path
 
 # --- Chargement des variables d'environnement ---
-load_dotenv()  # Charge le fichier .env
-##################################################
-TIREUSE = "blonde"
-##################################################
+load_dotenv()
 
-API_KEY = os.getenv("API_KEY", "change_moi") 
+API_KEY = os.getenv("API_KEY", "change_moi")
+TIREUSE_BEC = os.getenv("TIREUSE_BEC", "CHANGER_CI")
 # --- Chemins et répertoires ---
 BASE_DIR = Path(__file__).resolve().parent.parent
 LOG_DIR = Path("~/tibeer/logs")
@@ -23,7 +21,9 @@ VALVE_GPIO_PIN = int(os.getenv("VALVE_GPIO_PIN", "12"))  # Pin GPIO pour la vann
 VALVE_ACTIVE_HIGH = os.getenv("VALVE_ACTIVE_HIGH", "False").lower() == "true"
 
 # --- Configuration Débitmètre ---
-FLOW_CALIBRATION_FACTOR = float(os.getenv("FLOW_CALIBRATION_FACTOR", "6.5"))  # Impulsions/L
+FLOW_CALIBRATION_FACTOR = float(
+    os.getenv("FLOW_CALIBRATION_FACTOR", "6.5")
+)  # Impulsions/L
 FLOW_GPIO_PIN = int(os.getenv("FLOW_GPIO_PIN", "16"))  # Pin GPIO pour le débitmètre
 
 # --- Configuration Backend ---

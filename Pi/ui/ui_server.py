@@ -25,5 +25,5 @@ def update_display(message, color="blue", balance="--"):
     current_state["balance"] = str(balance)
 
 def run_server():
-    # On lance Flask sur le port 5000 (accessible localement)
+    # On lance Flask sur le port 5000
     app.run(host='0.0.0.0', port=5000, debug=False, use_reloader=False)

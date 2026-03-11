@@ -21,7 +21,7 @@ VENV_DIR="$TARGET_DIR/.venv"
 DEFAULT_DJANGO_SERVER="http://192.168.1.10:8000"
 DEFAULT_GIT_REPO=git@github.com:TiBillet/tiheureuse.git
 DEFAULT_GIT_BRANCH="master"
-DEFAULT_TIREUSE_ID="Le_Bilboquet"
+DEFAULT_TIREUSE_ID="CHANGER_CI"
 
 
 echo "🍻 INSTALLATION TIBEER "
@@ -217,9 +217,6 @@ PIN_RFID_RST=25
 EOF
 chmod 600 "$TARGET_DIR/.env"
 
-# Fichier pour Kiosk (url)
-echo "KIOSK_URL=${DJANGO_SERVER}/?tireuse_bec=${TIREUSE_BEC}" > "/home/$SYSUSER/kiosk.env"
-
 # ==========================================
 # ÉTAPE 7 : Configuration Affichage (Xinitrc)
 # ==========================================
@@ -250,9 +247,15 @@ export LANG=fr_FR.UTF-8
 export LANGUAGE=fr_FR:fr
 export LC_ALL=fr_FR.UTF-8
 
-# URL kiosque
-set -a; [ -f /home/sysop/kiosk.env ] && . /home/sysop/kiosk.env; set +a
-URL="${KIOSK_URL:-https://tibillet.org/fr/docs/commentappairer}"
+# URL kiosque - lit directement depuis .env
+set -a; [ -f /home/sysop/tibeer/.env ] && . /home/sysop/tibeer/.env; set +a
+DJANGO_SERVER="${API_URL:-http://192.168.1.10:8000}"
+TIREUSE_ID="${TIREUSE_BEC:-}"
+if [ -n "$TIREUSE_ID" ]; then
+    URL="${DJANGO_SERVER}/?tireuse_bec=${TIREUSE_ID}"
+else
+    URL="${DJANGO_SERVER}/"
+fi
 
 # Trouver Chromium
 CHROMIUM_BIN="$(command -v chromium-browser || command -v chromium || true)"

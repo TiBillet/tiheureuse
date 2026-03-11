@@ -7,9 +7,15 @@ export LANG=fr_FR.UTF-8
 export LANGUAGE=fr_FR:fr
 export LC_ALL=fr_FR.UTF-8
 
-# URL kiosque
-set -a; [ -f /home/sysop/kiosk.env ] && . /home/sysop/kiosk.env; set +a
-URL="${KIOSK_URL:-https://tibillet.org/fr/docs/commentappairer}"
+# URL kiosque - lit directement depuis .env
+set -a; [ -f /home/sysop/tibeer/.env ] && . /home/sysop/tibeer/.env; set +a
+DJANGO_SERVER="${API_URL:-http://192.168.1.10:8000}"
+TIREUSE_ID="${TIREUSE_BEC:-}"
+if [ -n "$TIREUSE_ID" ]; then
+    URL="${DJANGO_SERVER}/?tireuse_bec=${TIREUSE_ID}"
+else
+    URL="${DJANGO_SERVER}/"
+fi
 
 # Trouver Chromium
 CHROMIUM_BIN="$(command -v chromium-browser || command -v chromium || true)"

@@ -28,7 +28,7 @@ echo "[1/10] 📝 Configuration des variables"
 DEFAULT_DJANGO_SERVER="http://192.168.1.10:8000"
 DEFAULT_GIT_REPO="git@github.com:TiBillet/tiheureuse.git"
 DEFAULT_GIT_BRANCH="master"
-DEFAULT_TIREUSE_ID="Le_Bilboquet"
+DEFAULT_TIREUSE_ID="b7100a7b-a1ff-4664-b2a0-e5b47d992d8a"
 
 # --- Demande Django ---
 echo "🔹 Adresse IP du serveur Django"

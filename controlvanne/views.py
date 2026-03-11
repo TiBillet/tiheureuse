@@ -12,35 +12,71 @@ from django.db import transaction
 from django.db.models import F
 from channels.layers import get_channel_layer
 
+
 def _dec(x, d="0.00"):  # helper
-    try: return Decimal(str(x))
-    except: return Decimal(d)
-def index(request): return render(request, "controlvanne/index.html")
+    try:
+        return Decimal(str(x))
+    except:
+        return Decimal(d)
+
+
+def index(request):
+    return render(request, "controlvanne/index.html")
+
 
 def panel_multi(request):
-    # Index, première page chargée par le kiosque chromium des pi au lancement
     tireuse_bec = request.GET.get("tireuse_bec")
-    if tireuse_bec :
-        becs = TireuseBec.objects.filter(slug=tireuse_bec.lower())
-    else :
-        becs = TireuseBec.objects.all()
+    print(f"DEBUG: tireuse_bec = '{tireuse_bec}'")
+    if tireuse_bec:
+        becs = None
+        try:
+            from uuid import UUID
 
-    return render(request, "controlvanne/panel_bootstrap.html", {
-        "becs": becs,
-    })
+            UUID(tireuse_bec)
+            becs = TireuseBec.objects.filter(uuid=tireuse_bec)
+            print(f"DEBUG: cherche par UUID, trouvé: {becs.count()}")
+        except (ValueError, TypeError):
+            print(f"DEBUG: pas un UUID, chercher par nom")
+            becs = TireuseBec.objects.filter(name__iexact=tireuse_bec)
+            print(f"DEBUG: trouvé par nom: {becs.count()}")
+        if not becs:
+            becs = TireuseBec.objects.all()
+            print(f"DEBUG: fallback all, trouvé: {becs.count()}")
+    else:
+        becs = TireuseBec.objects.all()
+    print(f"DEBUG: becs total: {becs.count()}")
+
+    # Déterminer le slug_focus pour le WebSocket
+    slug_focus = tireuse_bec if tireuse_bec else "all"
+
+    return render(
+        request,
+        "controlvanne/panel_bootstrap.html",
+        {
+            "becs": becs,
+            "slug_focus": slug_focus,
+        },
+    )
+
 
 def _check_key(request):
     key = request.headers.get("X-API-Key") or request.GET.get("key")
     want = getattr(settings, "AGENT_SHARED_KEY", None)
     return (not want) or (key == want)
-def _norm_uid(uid: str) -> str: return re.sub(r"[^0-9A-Fa-f]","", uid or "").upper()
+
+
+def _norm_uid(uid: str) -> str:
+    return re.sub(r"[^0-9A-Fa-f]", "", uid or "").upper()
+
 
 SAFE = re.compile(r"[^A-Za-z0-9._-]")
-def _safe(slug: str) -> str:
-    return SAFE.sub("", (slug or "").strip().lower())[:80] or "all"
 
 
-def _ws_push(slug, data):
+def _safe(name: str) -> str:
+    return (name or "").strip().lower()[:80] or "all"
+
+
+def _ws_push(tireuse_bec, data):
     """
     Envoie un message WebSocket à un groupe spécifique ET au groupe 'all'.
     """
@@ -48,29 +84,26 @@ def _ws_push(slug, data):
     if not channel_layer:
         return
 
-    # Nettoyage du slug (ex: "narval")
-    safe_slug = (slug or "").strip().lower()
-    if not safe_slug:
-        safe_slug = "all"
+    # Nom du groupe avec UUID (accepte soit un objet TireuseBec soit un UUID string)
+    if hasattr(tireuse_bec, "uuid"):
+        group_uuid = str(tireuse_bec.uuid)
+    else:
+        group_uuid = str(tireuse_bec)
 
-    # Nom du groupe EXACTEMENT comme dans ton consumer (rfid_state.narval)
-    group_name = f"rfid_state.{safe_slug}"
+    group_name = f"rfid_state.{group_uuid}"
 
     # Structure du message pour le consumer Django Channels
     # "type": "state_update" appelle la méthode state_update du consumer
-    message_structure = {
-        "type": "state_update",
-        "payload": data
-    }
+    message_structure = {"type": "state_update", "payload": data}
 
     print(f"📡 WS PUSH vers {group_name} : {data.get('message')}")
 
-    # 1. Envoi au canal spécifique (ex: rfid_state.narval)
+    # 1. Envoi au canal spécifique
     async_to_sync(channel_layer.group_send)(group_name, message_structure)
 
     # 2. Envoi au canal général (rfid_state.all) pour le dashboard admin
-    if safe_slug != "all":
-        async_to_sync(channel_layer.group_send)("rfid_state.all", message_structure)
+    # if safe_name != "all":
+    async_to_sync(channel_layer.group_send)("rfid_state.all", message_structure)
 
 
 @csrf_exempt
@@ -78,33 +111,34 @@ def ping(request):
     """Répond au test de connexion du Raspberry Pi"""
     return JsonResponse({"status": "pong", "message": "Server online"})
 
+
 @csrf_exempt
 def api_rfid_authorize(request):
     """Vérifie si une carte est autorisée et crée une session."""
-    #----Debug---
+    # ----Debug---
     print(f"👀 DATA REÇU DU PI rfid_authorize (Brut) : {request.body}")
 
-    # Si le Pi envoie du JSON, vous pouvez aussi le voir plus proprement :
+    # le Pi envoie du JSON
     try:
         data = json.loads(request.body)
         print(f"👀 DATA DECODÉ : {data}")
     except:
         print("Pas de JSON valide")
-    #---Fin Debug---
+    # ---Fin Debug---
 
     # 1. Parsing des données reçues
     try:
         data = json.loads(request.body)
         uid_raw = data.get("uid")
         # On récupère l'ID de la tireuse (envoyé par le Pi) pour savoir où afficher l'erreur
-        target_slug = data.get("tireuse_id") or data.get("tireuse_bec") or "all"
+        target_uuid = data.get("tireuse_id") or data.get("tireuse_bec") or "all"
     except (json.JSONDecodeError, AttributeError):
         return JsonResponse({"error": "JSON invalide"}, status=400)
 
     # Debug Log
-    print(f"🔍 AUTH REQUEST: UID={uid_raw} sur BEC={target_slug}")
+    print(f"🔍 AUTH REQUEST: UID={uid_raw} sur BEC={target_uuid}")
 
-    # 2. Vérification Clé API (Optionnel selon ta config)
+    # 2. Vérification Clé API
     if not _check_key(request):
         return JsonResponse({"error": "Clé API invalide"}, status=403)
 
@@ -121,15 +155,19 @@ def api_rfid_authorize(request):
         msg = "Carte inconnue ou expirée"
         print(f"⛔ REFUS {uid} : {msg}")
 
-        # C'est ici que ça corrige ton problème d'affichage Rouge :
-        _ws_push(target_slug, {
-            "tireuse_bec": target_slug,
-            "present": True,
-            "authorized": False,  # Rouge
-            "vanne_ouverte": False,
-            "uid": uid,
-            "message": msg
-        })
+        # affichage Rouge :
+        _ws_push(
+            target_uuid,
+            {
+                "tireuse_bec": target_uuid,
+                "tireuse_bec_uuid": target_uuid,
+                "present": True,
+                "authorized": False,  # Rouge
+                "vanne_ouverte": False,
+                "uid": uid,
+                "message": msg,
+            },
+        )
         return JsonResponse({"authorized": False, "error": msg}, status=403)
 
     # --- CAS ERREUR : SOLDE INSUFFISANT ---
@@ -137,30 +175,40 @@ def api_rfid_authorize(request):
         msg = f"Solde insuffisant ({card.balance}€)"
         print(f"⛔ REFUS {uid} : {msg}")
 
-        _ws_push(target_slug, {
-            "tireuse_bec": target_slug,
-            "present": True,
-            "authorized": False,  # Rouge
-            "vanne_ouverte": False,
-            "uid": uid,
-            "balance": str(card.balance),
-            "message": msg
-        })
+        _ws_push(
+            target_uuid,
+            {
+                "tireuse_bec": target_uuid,
+                "tireuse_bec_uuid": target_uuid,
+                "present": True,
+                "authorized": False,  # Rouge
+                "vanne_ouverte": False,
+                "uid": uid,
+                "balance": str(card.balance),
+                "message": msg,
+            },
+        )
         return JsonResponse({"authorized": False, "error": msg}, status=403)
 
     # 4. Gestion de la Session (Succès)
     open_session = RfidSession.objects.filter(card=card, ended_at__isnull=True).first()
 
     if not open_session:
-        # On cherche la tireuse correspondant au slug envoyé par le Pi
-        tireuse_bec = TireuseBec.objects.filter(slug__iexact=target_slug).first()
+        # On cherche la tireuse correspondant à l'UUID envoyé par le Pi
+        tireuse_bec = TireuseBec.objects.filter(uuid=target_uuid).first()
 
-        # Fallback si slug inconnu
+        # Fallback si UUID inconnu, chercher par nom
+        if not tireuse_bec:
+            tireuse_bec = TireuseBec.objects.filter(name__iexact=target_uuid).first()
+
+        # Dernier recours
         if not tireuse_bec:
             tireuse_bec = TireuseBec.objects.filter(enabled=True).first()
 
         if not tireuse_bec:
-            return JsonResponse({"authorized": False, "error": "Aucun bec dispo"}, status=500)
+            return JsonResponse(
+                {"authorized": False, "error": "Aucun bec dispo"}, status=500
+            )
 
         # Création session
         open_session = RfidSession.objects.create(
@@ -173,37 +221,40 @@ def api_rfid_authorize(request):
             liquid_label_snapshot=tireuse_bec.liquid_label,
             label_snapshot=card.label,
             unit_label_snapshot=tireuse_bec.unit_label,
-            unit_ml_snapshot=tireuse_bec.unit_ml
+            unit_ml_snapshot=tireuse_bec.unit_ml,
         )
     else:
         tireuse_bec = open_session.tireuse_bec
 
     # 5. SUCCÈS : Notification Écran (VERT)
     payload_ws = {
-        "tireuse_bec": tireuse_bec.slug,
+        "tireuse_bec": tireuse_bec.name,
+        "tireuse_bec_uuid": str(tireuse_bec.uuid),
         "present": True,
         "authorized": True,  # Vert
         "vanne_ouverte": True,  # Vert
         "uid": uid,
         "liquid_label": tireuse_bec.liquid_label,
         "balance": str(card.balance),
-        "message": f"Badge accepté. Solde: {card.balance} €"
+        "message": f"Badge accepté. Solde: {card.balance} €",
     }
 
-    print(f"✅ SUCCÈS {uid} sur {tireuse_bec.slug}")
+    print(f"✅ SUCCÈS {uid} sur {tireuse_bec.name}")
 
-    # On utilise la même fonction _ws_push corrigée
-    _ws_push(tireuse_bec.slug, payload_ws)
+    # On utilise la _ws_push
+    _ws_push(tireuse_bec, payload_ws)
 
     # 6. Réponse HTTP au Pi
-    return JsonResponse({
-        "authorized": True,
-        "session_id": open_session.id,
-        "balance": str(card.balance),
-        "liquid_label": tireuse_bec.liquid_label,
-        "unit_label": tireuse_bec.unit_label,
-        "unit_ml": float(tireuse_bec.unit_ml)
-    })
+    return JsonResponse(
+        {
+            "authorized": True,
+            "session_id": open_session.id,
+            "balance": str(card.balance),
+            "liquid_label": tireuse_bec.liquid_label,
+            "unit_label": tireuse_bec.unit_label,
+            "unit_ml": float(tireuse_bec.unit_ml),
+        }
+    )
 
 
 @csrf_exempt
@@ -230,13 +281,13 @@ def api_rfid_event(request):
     event_data = data.get("data", {})
     session_id = event_data.get("session_id")
 
-    # Calcul Volume : On convertit le float reçu en Decimal proprement
+    # Calcul Volume : On convertit le float reçu en Decimal
     volume_float = float(event_data.get("volume_ml", 0.0))
     current_vol = Decimal(f"{volume_float}").quantize(Decimal("0.01"))
 
     # Initialisation de la variable tireuse_bec
-    #tireuse_bec = None
-    target_slug_raw = data.get("tireuse_bec") or data.get("tireuse_id")
+    # tireuse_bec = None
+    target_uuid_raw = data.get("tireuse_bec") or data.get("tireuse_id")
     tireuse_bec = None
     session = None
 
@@ -246,24 +297,24 @@ def api_rfid_event(request):
             session = RfidSession.objects.get(pk=session_id)
             tireuse_bec = session.tireuse_bec
         except RfidSession.DoesNotExist:
-            pass  # On gérera l'erreur plus bas si besoin
+            pass
 
     # 2. SI PAS DE SESSION ID (Cas card_removed ou auth_fail)
-    if not tireuse_bec and target_slug_raw:
-        tireuse_bec = TireuseBec.objects.filter(slug__iexact=target_slug_raw).first()
+    if not tireuse_bec and target_uuid_raw:
+        tireuse_bec = TireuseBec.objects.filter(uuid=target_uuid_raw).first()
+        if not tireuse_bec:
+            tireuse_bec = TireuseBec.objects.filter(
+                name__iexact=target_uuid_raw
+            ).first()
 
-    # On essaie de deviner le bec via la dernière session connue de cet UID
-    #if not tireuse_bec and uid:
-    #    last_sess = RfidSession.objects.filter(card__uid=uid).order_by('started_at').first()
-    #    if last_sess:
-    #        tireuse_bec = last_sess.tireuse_bec
-
-    # 3. DERNIER RECOURS (votre code précédent)
+    # 3. DERNIER RECOURS
     if not tireuse_bec:
         tireuse_bec = TireuseBec.objects.first()
 
     if not tireuse_bec:
-        return JsonResponse({"status": "error", "message": "Aucun bec trouvé"}, status=500)
+        return JsonResponse(
+            {"status": "error", "message": "Aucun bec trouvé"}, status=500
+        )
     # =========================================================================
     # LOGIQUE EVENEMENTS
     # =========================================================================
@@ -271,26 +322,34 @@ def api_rfid_event(request):
     # --- CAS 1 : IDENTIFIANT REFUSÉ / CARTE REMIS EN ROUGE ---
     if event_type == "auth_fail":
         message = data.get("message", "Non autorisé")
-        print(f"EVENT AUTH_FAIL reçu pour {tireuse_bec.slug}")
-        _ws_push(tireuse_bec.slug, {
-            "tireuse_bec": tireuse_bec.slug,
-            "present": True,
-            "authorized": False,
-            "vanne_ouverte": False,
-            "uid": uid,
-            "message": message
-        })
+        print(f"EVENT AUTH_FAIL reçu pour {tireuse_bec.name}")
+        _ws_push(
+            tireuse_bec,
+            {
+                "tireuse_bec": tireuse_bec.name,
+                "tireuse_bec_uuid": str(tireuse_bec.uuid),
+                "present": True,
+                "authorized": False,
+                "vanne_ouverte": False,
+                "uid": uid,
+                "message": message,
+            },
+        )
         return JsonResponse({"status": "ok"})
 
     # --- CAS 2 : RETRAIT CARTE (RESET ECRAN) ---
     if event_type == "card_removed":
-        _ws_push(tireuse_bec.slug, {
-            "tireuse_bec": tireuse_bec.slug,
-            "present": False,
-            "uid": "",
-            "message": "En attente...",
-            "authorized": False
-        })
+        _ws_push(
+            tireuse_bec,
+            {
+                "tireuse_bec": tireuse_bec.name,
+                "tireuse_bec_uuid": str(tireuse_bec.uuid),
+                "present": False,
+                "uid": "",
+                "message": "En attente...",
+                "authorized": False,
+            },
+        )
         return JsonResponse({"status": "ok"})
 
     # --- CAS 3 : FLUX (START, UPDATE, END) ---
@@ -301,25 +360,30 @@ def api_rfid_event(request):
     try:
         session = RfidSession.objects.get(pk=session_id)
     except RfidSession.DoesNotExist:
-        return JsonResponse({"status": "error", "message": "Session not found"}, status=404)
+        return JsonResponse(
+            {"status": "error", "message": "Session not found"}, status=404
+        )
 
     # A. Début de versage
     if event_type == "pour_start":
         # On informe juste l'écran (Vert)
-        _ws_push(tireuse_bec.slug, {
-            "tireuse_bec": tireuse_bec.slug,
-            "present": True,
-            "authorized": True,
-            "uid": uid,
-            "liquid_label": session.liquid_label_snapshot,
-            "balance": str(session.card.balance) if session.card else "0.00",
-            "volume_ml": 0.0,
-            "message": "Servez-vous !"
-        })
+        _ws_push(
+            tireuse_bec,
+            {
+                "tireuse_bec": tireuse_bec.name,
+                "tireuse_bec_uuid": str(tireuse_bec.uuid),
+                "present": True,
+                "authorized": True,
+                "uid": uid,
+                "liquid_label": session.liquid_label_snapshot,
+                "balance": str(session.card.balance) if session.card else "0.00",
+                "volume_ml": 0.0,
+                "message": "Servez-vous !",
+            },
+        )
 
     # B. Mise à jour ou Fin
     elif event_type in ["pour_update", "pour_end"]:
-
         with transaction.atomic():
             # 1. Calculer combien on a versé DEPUIS LA DERNIERE FOIS pour le Stock
             # On utilise volume_delta_ml comme "dernier volume connu"
@@ -335,8 +399,9 @@ def api_rfid_event(request):
             # Mise à jour Stock Tireuse (si positif)
             if delta_stock > 0:
                 tb = TireuseBec.objects.select_for_update().get(pk=tireuse_bec.pk)
-                tb.reservoir_ml = (tb.reservoir_ml - delta_stock)
-                if tb.reservoir_ml < 0: tb.reservoir_ml = Decimal("0.00")
+                tb.reservoir_ml = tb.reservoir_ml - delta_stock
+                if tb.reservoir_ml < 0:
+                    tb.reservoir_ml = Decimal("0.00")
                 tb.save()
                 # On met à jour l'objet local pour le renvoyer au WS
                 tireuse_bec.reservoir_ml = tb.reservoir_ml
@@ -360,7 +425,9 @@ def api_rfid_event(request):
 
                     if current_vol > 0 and unit_ml > 0:
                         # Calcul prix
-                        units = (current_vol / unit_ml).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                        units = (current_vol / unit_ml).quantize(
+                            Decimal("0.01"), rounding=ROUND_HALF_UP
+                        )
 
                         # Plafond solde
                         if units > card.balance:
@@ -380,15 +447,15 @@ def api_rfid_event(request):
             channel_layer = get_channel_layer()
 
             # 2. On construit le nom du groupe EXACTEMENT comme dans consumers.py
-            # Votre consumer fait : f"rfid_state.{group.lower()}"
-            group_name = f"rfid_state.{tireuse_bec.slug.lower()}"
+            group_name = f"rfid_state.{tireuse_bec.uuid}"
 
             # 3. On prépare les données (le payload)
             data_to_send = {
-                "tireuse_bec": tireuse_bec.slug,
+                "tireuse_bec": tireuse_bec.name,
+                "tireuse_bec_uuid": str(tireuse_bec.uuid),
                 "present": True if not session_done else False,
                 "authorized": True,
-                "vanne_ouverte": True,  # Vital pour le frontend
+                "vanne_ouverte": True,
                 "session_done": session_done,
                 "uid": uid,
                 "liquid_label": session.liquid_label_snapshot or "Bière",
@@ -396,36 +463,26 @@ def api_rfid_event(request):
                 "charged": charged_display,
                 "balance": balance_display,
                 "reservoir_ml": float(tireuse_bec.reservoir_ml),
-                "message": f"Terminé : {current_vol:.0f} ml" if session_done else "Service en cours..."
+                "message": f"Terminé : {current_vol:.0f} ml"
+                if session_done
+                else "Service en cours...",
             }
 
             # 4. On envoie. IMPORTANT :
             # - "type" doit correspondre au nom de la méthode dans Consumer (`async def state_update`)
             # - Le consumer attend les données dans une clé "payload"
-            print(f"🚀 ENVOI WS vers '{tireuse_bec.slug}' ET vers 'ALL'")
+            print(f"🚀 ENVOI WS vers '{tireuse_bec.name}' ET vers 'ALL'")
 
             # 1. Envoi au canal SPÉCIFIQUE (pour l'écran du Pi)
             # ex: rfid_state.narval
             async_to_sync(channel_layer.group_send)(
-                f"rfid_state.{tireuse_bec.slug.lower()}",
-                {
-                    "type": "state_update",
-                    "payload": data_to_send
-                }
+                f"rfid_state.{tireuse_bec.uuid}",
+                {"type": "state_update", "payload": data_to_send},
             )
 
             # 2. Envoi au canal GÉNÉRAL (pour le Dashboard PC)
-            # Votre consumer.py utilise "rfid_state.all" par défaut quand il n'y a pas de slug
             async_to_sync(channel_layer.group_send)(
-                "rfid_state.all",
-                {
-                    "type": "state_update",
-                    "payload": data_to_send
-                }
+                "rfid_state.all", {"type": "state_update", "payload": data_to_send}
             )
 
     return JsonResponse({"status": "ok"})
-
-
-
-

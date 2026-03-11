@@ -15,11 +15,9 @@
         <h1>Le Bar de Mike</h1><p><a href="/admin/">Admin</a></p>
 <script>
 (function () {
-  // slug cible (exigé pour un kiosque par bec)
   const params = new URLSearchParams(location.search);
-  let onlySlug = (params.get('tireuse_bec') || '').trim().toLowerCase();
+  let onlyName = (params.get('tireuse_bec') || '').trim().toLowerCase();
 
-  // crée (une fois) l'unique carte
   function ensureSingleCard() {
     let el = document.querySelector('#single-card');
     if (!el) {
@@ -29,7 +27,7 @@
       el.innerHTML = `
         <h2 style="margin-top:0">
           <span data-role="title">Liquide</span>
-          <small style="color:#777">(<span data-role="slug">—</span>)</small>
+          <small style="color:#777">(<span data-role="name">—</span>)</small>
         </h2>
         <div class="stat">Vanne: <span class="badge off" data-role="etat">Fermée</span></div>
         <div>Carte présente: <b data-role="present">non</b></div>
@@ -40,11 +38,10 @@
       `;
       document.body.appendChild(el);
     }
-    // renvoie les refs vers les champs
     return {
       root: el,
       titleEl: el.querySelector('[data-role="title"]'),
-      slugEl: el.querySelector('[data-role="slug"]'),
+      nameEl: el.querySelector('[data-role="name"]'),
       etat: el.querySelector('[data-role="etat"]'),
       present: el.querySelector('[data-role="present"]'),
       uid: el.querySelector('[data-role="uid"]'),
@@ -57,35 +54,39 @@
 
   const card = ensureSingleCard();
 
-  // si on a un slug ciblé, afficher tout de suite l’entête
-  if (onlySlug) {
-    card.slugEl.textContent = onlySlug;
+  if (onlyName) {
+    card.nameEl.textContent = onlyName;
     card.titleEl.textContent = 'Chargement…';
   }
 
-  // construit l'URL WS pour un slug donné
-  function wsUrlFromSlug(slug){
+  function wsUrlFromName(name){
     const proto = (location.protocol === 'https:') ? 'wss' : 'ws';
-    const q = slug ? ('?tireuse_bec=' + encodeURIComponent(slug)) : '';
-    return proto + '://' + location.host + '/ws/panel/' + q;
+    if (!name || name === 'all') {
+      return proto + '://' + location.host + '/ws/rfid/all/';
+    }
+    return proto + '://' + location.host + '/ws/rfid/' + encodeURIComponent(name) + '/';
   }
 
   let ws = null;
   function connect(){
-    const wsUrl = wsUrlFromSlug(onlySlug);
+    const wsUrl = wsUrlFromName(onlyName);
+    console.log('🔌 Connecting to:', wsUrl);
     ws = new WebSocket(wsUrl);
+    
+    ws.onopen = () => console.log('🔌 WS Connected');
+    ws.onclose = (e) => console.log('🔌 WS Closed:', e.code, e.reason);
+    ws.onerror = (e) => console.log('🔌 WS Error:', e);
 
     ws.onmessage = (e) => {
+      console.log('📨 WS Message:', e.data);
       const j = JSON.parse(e.data);
 
-      // redirection automatique après rename (message redirect_to)
       if (j.redirect_to) {
-        const newSlug = String(j.redirect_to).trim().toLowerCase();
-        if (newSlug && newSlug !== onlySlug) {
-          onlySlug = newSlug;
-          // update URL de la page sans recharger (utile au reboot)
+        const newName = String(j.redirect_to).trim().toLowerCase();
+        if (newName && newName !== onlyName) {
+          onlyName = newName;
           const newParams = new URLSearchParams(location.search);
-          newParams.set('tireuse_bec', newSlug);
+          newParams.set('tireuse_bec', newName);
           history.replaceState(null, '', location.pathname + '?' + newParams.toString());
           try { ws.close(); } catch(e){}
           setTimeout(connect, 100);
@@ -93,13 +94,11 @@
         }
       }
 
-      const slug = (j.tireuse_bec || onlySlug || 'default').toLowerCase();
+      const name = (j.tireuse_bec || onlyName || 'default').toLowerCase();
 
-      // si on a un slug ciblé, ignorer les autres
-      if (onlySlug && slug !== onlySlug) return;
+      if (onlyName && name !== onlyName) return;
 
-      // MAJ de l’unique carte
-      card.slugEl.textContent = slug;
+      card.nameEl.textContent = name;
       card.titleEl.textContent = (j.liquid_label || 'Liquide');
       card.etat.textContent = j.vanne_ouverte ? 'Ouverte' : 'Fermée';
       card.etat.className = 'badge ' + (j.vanne_ouverte ? 'on' : 'off');

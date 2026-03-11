@@ -65,7 +65,7 @@ def main():
         logger.error(f"Erreur fatale dans le main: {e}", exc_info=True)
         sys.exit(1)
     finally:
-        # Nettoyage final garantit
+        # Nettoyage final
         if controller:
             logger.info("Exécution du nettoyage final...")
             controller.cleanup()
