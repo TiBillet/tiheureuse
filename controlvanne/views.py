@@ -120,7 +120,7 @@ def api_rfid_authorize(request):
         data = json.loads(request.body)
         uid_raw = data.get("uid")
         # On récupère l'ID de la tireuse (envoyé par le Pi) pour savoir où afficher l'erreur
-        target_uuid = data.get("tireuse_id") or data.get("tireuse_bec") or "all"
+        target_uuid = data.get("tireuse_bec") or "all"
     except (json.JSONDecodeError, AttributeError):
         return JsonResponse({"error": "JSON invalide"}, status=400)
 
@@ -268,7 +268,7 @@ def api_rfid_authorize(request):
             "balance": str(card.balance),
             "liquid_label": tireuse_bec.liquid_label,
             "unit_label": tireuse_bec.unit_label,
-            "unit_ml": float(tireuse_bec.unit_ml),
+            "unit_ml": str(tireuse_bec.unit_ml),
             "flow_calibration_factor": flow_factor,
         }
     )
@@ -305,7 +305,7 @@ def api_rfid_event(request):
     debit_l_min = float(event_data.get("debit_l_min", 0.0))
 
     # Initialisation des variables
-    target_uuid_raw = data.get("tireuse_bec") or data.get("tireuse_id")
+    target_uuid_raw = data.get("tireuse_bec")
     tireuse_bec = None
     session = None
     solde_epuise = False  # Variable pour suivre si le solde est épuisé

@@ -83,7 +83,7 @@ class TireuseBec(models.Model):
     agent_base_url = models.CharField(
         max_length=200,
         blank=True,
-        default="http://192.168.1.56:5000",
+        default="",
         help_text="URL de l'agent Flask sur le Pi (ex: http://pi:5000)",
     )
 
@@ -141,9 +141,9 @@ class RfidSession(models.Model):
 
     started_at = models.DateTimeField(default=timezone.now, db_index=True)
     ended_at = models.DateTimeField(null=True, blank=True, db_index=True)
-    volume_start_ml = models.FloatField(default=0.0)
-    volume_end_ml = models.FloatField(default=0.0)
-    volume_delta_ml = models.FloatField(default=0.0)
+    volume_start_ml = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("0.00"))
+    volume_end_ml = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("0.00"))
+    volume_delta_ml = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("0.00"))
     dernier_volume_ml = models.DecimalField(
         max_digits=10, decimal_places=2, default=Decimal("0.00")
     )
@@ -165,7 +165,8 @@ class RfidSession(models.Model):
         cohérent avec ce que views.py stocke dans volume_delta_ml.
         """
         self.ended_at = timezone.now()
-        self.volume_delta_ml = max(0.0, float(served_volume_ml or 0.0))
+        vol = Decimal(str(float(served_volume_ml or 0))).quantize(Decimal("0.01"))
+        self.volume_delta_ml = max(Decimal("0.00"), vol)
         self.volume_end_ml = self.volume_delta_ml
         self.save()
 

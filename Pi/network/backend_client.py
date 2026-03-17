@@ -24,7 +24,7 @@ class BackendClient:
         Renvoie un dictionnaire avec 'authorized': True/False et le reste des infos.
         """
         url = f"{self.base_url}/authorize"
-        payload = {"uid": uid, "tireuse_id": self.tireuse_id}
+        payload = {"uid": uid, "tireuse_bec": self.tireuse_id}
 
         try:
             logger.debug(f"Demande autorisation pour {uid}...")

@@ -1,14 +1,24 @@
+import os
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-w)cei*-fqfd#z&y7l)5n@zl=cp_=9o(nuo#c)4!h@tm8l1hy_m'
+# Charge un fichier .env local si python-dotenv est disponible (dev)
+try:
+    from dotenv import load_dotenv
+    load_dotenv(BASE_DIR / ".env")
+except ImportError:
+    pass
 
-# SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+SECRET_KEY = os.environ.get(
+    "SECRET_KEY",
+    "django-insecure-w)cei*-fqfd#z&y7l)5n@zl=cp_=9o(nuo#c)4!h@tm8l1hy_m",
+)
 
-ALLOWED_HOSTS = ["*"]
+DEBUG = os.environ.get("DEBUG", "True").lower() == "true"
+
+_hosts = os.environ.get("ALLOWED_HOSTS", "")
+ALLOWED_HOSTS = [h.strip() for h in _hosts.split(",") if h.strip()] or ["*"]
 # Application definition
 
 INSTALLED_APPS = [
@@ -67,7 +77,7 @@ DATABASES = {
     }
 }
 
-AGENT_SHARED_KEY = "changeme"   # même valeur côté Pi3
+AGENT_SHARED_KEY = os.environ.get("AGENT_SHARED_KEY", "changeme")
 
 # Password validation
 # https://docs.djangoproject.com/en/4.2/ref/settings/#auth-password-validators
@@ -96,6 +106,11 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 STATIC_URL = 'static/'
 STATIC_ROOT = BASE_DIR / "staticfiles"
-STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
+if DEBUG:
+    # Dev : Django sert les fichiers statiques directement, pas besoin de collectstatic
+    STATICFILES_STORAGE = "django.contrib.staticfiles.storage.StaticFilesStorage"
+else:
+    # Production : whitenoise avec manifest haché
+    STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'

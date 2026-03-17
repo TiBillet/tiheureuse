@@ -213,13 +213,21 @@ echo "[6/10] ⚙️ Création fichier .env..."
 BACKEND_HOST_PARSED=$(echo "$DJANGO_SERVER" | sed 's~https\?://~~' | sed 's~:[0-9]*$~~')
 BACKEND_PORT_PARSED=$(echo "$DJANGO_SERVER" | grep -oE ':[0-9]+$' | tr -d ':')
 BACKEND_PORT_PARSED=${BACKEND_PORT_PARSED:-8000}
+
+# Clé API partagée (doit correspondre à AGENT_SHARED_KEY dans Django settings.py)
+read -p "🔹 Clé API partagée (AGENT_SHARED_KEY dans Django) : " BACKEND_API_KEY
+while [ -z "$BACKEND_API_KEY" ]; do
+    echo "   ⚠️  La clé ne peut pas être vide."
+    read -p "🔹 Clé API partagée : " BACKEND_API_KEY
+done
+
 cat << EOF > "$TARGET_DIR/.env"
 # Généré par le script d'installation
 TIREUSE_BEC=$TIREUSE_BEC
 API_URL=$DJANGO_SERVER
 BACKEND_HOST=$BACKEND_HOST_PARSED
 BACKEND_PORT=$BACKEND_PORT_PARSED
-BACKEND_API_KEY=changeme
+BACKEND_API_KEY=$BACKEND_API_KEY
 DEBUG=False
 # GPIO Settings
 GPIO_VANNE=12
@@ -324,7 +332,7 @@ echo "[8/10] 🔧 Création des Services..."
 sudo systemctl enable pigpiod
 sudo systemctl start pigpiod
 
-# Service Kiosk (EXACTEMENT comme fourni)
+# Service Kiosk
 cat << EOF | sudo tee /etc/systemd/system/kiosk.service
 [Unit]
 Description=Chromium Kiosk
@@ -355,7 +363,7 @@ RestartSec=8
 WantedBy=multi-user.target
 EOF
 
-# Service Tibeer (Adapté aux chemins créés)
+# Service Tibeer
 cat << EOF | sudo tee /etc/systemd/system/tibeer.service
 [Unit]
 Description==Agent RFID + Vanne (tibeer)
@@ -368,7 +376,7 @@ Type=simple
 User=sysop
 WorkingDirectory=$TARGET_DIR
 EnvironmentFile=$TARGET_DIR/.env
-# Mise à jour git au démarrage (si configuré)
+# Mise à jour git au démarrage
 ExecStartPre=$TARGET_DIR/git-update.sh
 # Utilisation du python dans le .venv qu'on vient de créer
 ExecStart=$VENV_DIR/bin/python $TARGET_DIR/main.py
