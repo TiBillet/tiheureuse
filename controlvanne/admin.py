@@ -4,26 +4,17 @@ from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
 from django.http import HttpResponse
 from django.contrib import admin, messages
-from django.conf import settings
 from django.utils.html import format_html
-import csv, re
-import requests
-
-AGENT_KEY = getattr(settings, "AGENT_SHARED_KEY", "changeme")
-
-
-def _safe(name: str) -> str:
-    return (name or "").strip().lower()[:80] or "all"
+import csv
 
 
 @admin.register(TireuseBec)
 class TireuseBecAdmin(admin.ModelAdmin):
     form = TireuseBecForm
-    actions = ["push_kiosk_url", "push_refresh"]
+    actions = ["push_kiosk_url", "push_reload", "push_refresh"]
     list_display = (
         "name_with_uuid",
         "debimetre",
-        "agent_base_url",
         "liquid_label",
         "reservoir_ml",
         "seuil_mini_ml",
@@ -36,7 +27,6 @@ class TireuseBecAdmin(admin.ModelAdmin):
     list_editable = (
         "debimetre",
         "liquid_label",
-        "agent_base_url",
         "unit_label",
         "unit_ml",
         "enabled",
@@ -58,42 +48,32 @@ class TireuseBecAdmin(admin.ModelAdmin):
     def get_readonly_fields(self, request, obj=None):
         return ("uuid",) + super().get_readonly_fields(request, obj)
 
-    def push_kiosk_url(self, request, queryset):
-        ok, ko = 0, 0
-        for tb in queryset:
-            try:
-                target = (
-                    f"{request.scheme}://{request.get_host()}/?tireuse_bec={tb.uuid}"
-                )
-                endpoint = (tb.agent_base_url or "").rstrip(
-                    "/"
-                ) + "/agent/kiosk/set_url"
-                r = requests.post(
-                    endpoint,
-                    json={"url": target},
-                    headers={"X-API-Key": AGENT_KEY},
-                    timeout=3.0,
-                )
-                if r.ok and r.json().get("ok"):
-                    ok += 1
-                else:
-                    ko += 1
-            except Exception:
-                ko += 1
-        if ok:
-            self.message_user(
-                request,
-                f"KIOSK_URL mis à jour et kiosque relancé pour {ok} bec(s).",
-                level=messages.SUCCESS,
-            )
-        if ko:
-            self.message_user(
-                request,
-                f"Échec sur {ko} bec(s). Vérifie agent_base_url et la clé API.",
-                level=messages.ERROR,
-            )
+    # def push_kiosk_url(self, request, queryset):
+    #     ch = get_channel_layer()
+    #     n = 0
+    #     for tb in queryset:
+    #         url = f"{request.scheme}://{request.get_host()}/?tireuse_bec={tb.uuid}"
+    #         async_to_sync(ch.group_send)(
+    #             f"rfid_state.{tb.uuid}",
+    #             {"type": "state_update", "payload": {"kiosk_url": url}},
+    #         )
+    #         n += 1
+    #     self.message_user(request, f"Nouvelle URL envoyée à {n} kiosque(s) via WebSocket.")
+    #
+    # push_kiosk_url.short_description = "Envoyer la bonne URL au kiosque (WebSocket)"
 
-    push_kiosk_url.short_description = "Mettre à jour l'URL du kiosque et redémarrer"
+    def push_reload(self, request, queryset):
+        ch = get_channel_layer()
+        n = 0
+        for tb in queryset:
+            async_to_sync(ch.group_send)(
+                f"rfid_state.{tb.uuid}",
+                {"type": "state_update", "payload": {"kiosk_reload": True}},
+            )
+            n += 1
+        self.message_user(request, f"Mise à jour de l'affichage envoyé à {n} kiosque(s).")
+
+    push_reload.short_description = "Mise à jour de l'affichage du kiosque"
 
     def push_refresh(self, request, queryset):
         # pousse un snapshot vers les panneaux abonnés

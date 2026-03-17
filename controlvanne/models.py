@@ -79,14 +79,6 @@ class TireuseBec(models.Model):
         help_text="Débitmètre associé (détermine le facteur de calibration)",
     )
 
-    # TODO: Esce utile ? a supprimer si non
-    agent_base_url = models.CharField(
-        max_length=200,
-        blank=True,
-        default="",
-        help_text="URL de l'agent Flask sur le Pi (ex: http://pi:5000)",
-    )
-
     # TODO: Passer en entier avec modulo si besoin ?
     reservoir_ml = models.DecimalField(
         max_digits=10,

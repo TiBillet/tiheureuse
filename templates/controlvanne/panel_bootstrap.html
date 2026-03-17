@@ -13,7 +13,7 @@
               <span class="badge bg-secondary me-2">{{ b.name }}</span>
               <strong class="text-info" id="liquid-{{ b.uuid }}">{{ b.liquid_label|default:"Liquide" }}</strong>
             </div>
-            <span class="badge bg-dark" id="agent-url-{{ b.uuid }}">{{ b.agent_base_url|default:"Display" }}</span>
+            <span class="badge bg-dark" id="uuid-badge-{{ b.uuid }}" title="{{ b.uuid }}" style="font-size:10px;cursor:pointer;" onclick="navigator.clipboard.writeText('{{ b.uuid }}')">{{ b.uuid|slice:":8" }}…</span>
           </div>
 
           <div class="card-body">
@@ -160,6 +160,10 @@
       try {
           const data = JSON.parse(ev.data);
           const payload = data.payload || data;
+
+          // Commandes kiosk
+          if (payload.kiosk_url) { window.location.href = payload.kiosk_url; return; }
+          if (payload.kiosk_reload) { window.location.reload(); return; }
 
           // Identification de la cible par UUID
           const targetUuid = payload.tireuse_bec_uuid || payload.tireuse_bec || '';
