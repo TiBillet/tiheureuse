@@ -21,7 +21,7 @@ VENV_DIR="$TARGET_DIR/.venv"
 DEFAULT_DJANGO_SERVER="http://192.168.1.10:8000"
 DEFAULT_GIT_REPO=git@github.com:TiBillet/tiheureuse.git
 DEFAULT_GIT_BRANCH="master"
-DEFAULT_TIREUSE_ID="CHANGER_CI"
+DEFAULT_TIREUSE_ID="b7100a7b-a1ff-4664-b2a0-e5b47d992d8a"
 
 
 echo "🍻 INSTALLATION TIBEER "
@@ -125,6 +125,10 @@ if [[ "$DO_CLONE" =~ ^[oO]$ ]]; then
         cp -a "$SOURCE_SUBDIR/." "$TARGET_DIR/"
         rm -rf "$TEMP_DIR"
         echo "✅ Fichiers installés."
+        
+        # Rendre le script de mise à jour exécutable
+        chmod +x "$TARGET_DIR/git-update.sh"
+        echo "✅ Script de mise à jour rendu exécutable."
     else
         echo "❌ Erreur : Pas de dossier 'Pi' trouvé dans la branche $GIT_BRANCH."
         rm -rf "$TEMP_DIR"
@@ -205,15 +209,26 @@ deactivate
 # ==========================================
 echo ""
 echo "[6/10] ⚙️ Création fichier .env..."
+# Extraction BACKEND_HOST et BACKEND_PORT depuis l'URL saisie
+BACKEND_HOST_PARSED=$(echo "$DJANGO_SERVER" | sed 's~https\?://~~' | sed 's~:[0-9]*$~~')
+BACKEND_PORT_PARSED=$(echo "$DJANGO_SERVER" | grep -oE ':[0-9]+$' | tr -d ':')
+BACKEND_PORT_PARSED=${BACKEND_PORT_PARSED:-8000}
 cat << EOF > "$TARGET_DIR/.env"
 # Généré par le script d'installation
 TIREUSE_BEC=$TIREUSE_BEC
 API_URL=$DJANGO_SERVER
+BACKEND_HOST=$BACKEND_HOST_PARSED
+BACKEND_PORT=$BACKEND_PORT_PARSED
+BACKEND_API_KEY=changeme
 DEBUG=False
 # GPIO Settings
-PIN_VANNE=18
-PIN_COMPTEUR=23
-PIN_RFID_RST=25
+GPIO_VANNE=12
+GPIO_FLOW_SENSOR=16
+RC522_RST_PIN=22
+RC522_SDA_PIN=24
+# Git Settings (pour mise à jour auto au démarrage)
+GIT_REPO=${GIT_REPO:-$DEFAULT_GIT_REPO}
+GIT_BRANCH=${GIT_BRANCH:-$DEFAULT_GIT_BRANCH}
 EOF
 chmod 600 "$TARGET_DIR/.env"
 
@@ -353,6 +368,8 @@ Type=simple
 User=sysop
 WorkingDirectory=$TARGET_DIR
 EnvironmentFile=$TARGET_DIR/.env
+# Mise à jour git au démarrage (si configuré)
+ExecStartPre=$TARGET_DIR/git-update.sh
 # Utilisation du python dans le .venv qu'on vient de créer
 ExecStart=$VENV_DIR/bin/python $TARGET_DIR/main.py
 Restart=always

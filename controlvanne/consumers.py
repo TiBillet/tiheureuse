@@ -12,23 +12,29 @@ def sanitize(name: str) -> str:
 class PanelConsumer(AsyncJsonWebsocketConsumer):
     async def connect(self):
         name = self.scope.get("url_route", {}).get("kwargs", {}).get("slug")
-        print(f"🔌 WS CONNECT: name={name}")
+        print(f"🔌 WS CONNECTION - slug recu: '{name}'")
 
         if name and name.lower() != "all":
-            self.group = f"rfid_state.{name}"
+            self.group = f"rfid_state.{name.lower()}"
         else:
             self.group = "rfid_state.all"
 
-        print(f"🔌 WS CONNECT: joining group {self.group}")
+        print(f"🔌 WS CONNECTION - abonnement au groupe: '{self.group}'")
 
         await self.channel_layer.group_add(self.group, self.channel_name)
         await self.accept()
-        print(f"🔌 WS CONNECT: accepted")
+        print(f"🔌 WS CONNECTION - connecte et abonne a '{self.group}'")
+
+        # Envoi de l'état initial au client qui vient de se connecter
+        initial = await self._initial_payload(name)
+        if initial:
+            await self.send_json(initial)
 
     async def disconnect(self, code):
         await self.channel_layer.group_discard(self.group, self.channel_name)
 
     async def state_update(self, event):
+        print(f"📡 WS ENVOI au groupe {self.group}: {event['payload']}")
         await self.send_json(event["payload"])
 
     @database_sync_to_async
@@ -55,24 +61,6 @@ class PanelConsumer(AsyncJsonWebsocketConsumer):
         )
         return {
             "tireuse_bec": tb.name,
-            "liquid_label": tb.liquid_label,
-            "present": bool(open_s and open_s.uid),
-            "authorized": bool(open_s.authorized) if open_s else False,
-            "vanne_ouverte": False,
-            "volume_ml": float(open_s.volume_end_ml if open_s else 0.0),
-            "debit_l_min": 0.0,
-            "message": open_s.last_message if open_s else "",
-            "uid": open_s.uid if open_s else None,
-        }
-
-        # on essaye d’afficher un état de base (si une session ouverte existe)
-        open_s = (
-            RfidSession.objects.filter(tireuse_bec=tb, ended_at__isnull=True)
-            .order_by("-started_at")
-            .first()
-        )
-        return {
-            "tireuse_bec": tb.slug,
             "liquid_label": tb.liquid_label,
             "present": bool(open_s and open_s.uid),
             "authorized": bool(open_s.authorized) if open_s else False,

@@ -1,4 +1,4 @@
-from .models import Card, RfidSession, TireuseBec
+from .models import Card, Debimetre, RfidSession, TireuseBec
 from .forms import TireuseBecForm
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
@@ -19,8 +19,10 @@ def _safe(name: str) -> str:
 @admin.register(TireuseBec)
 class TireuseBecAdmin(admin.ModelAdmin):
     form = TireuseBecForm
+    actions = ["push_kiosk_url", "push_refresh"]
     list_display = (
         "name_with_uuid",
+        "debimetre",
         "agent_base_url",
         "liquid_label",
         "reservoir_ml",
@@ -32,6 +34,7 @@ class TireuseBecAdmin(admin.ModelAdmin):
         "notes",
     )
     list_editable = (
+        "debimetre",
         "liquid_label",
         "agent_base_url",
         "unit_label",
@@ -95,19 +98,56 @@ class TireuseBecAdmin(admin.ModelAdmin):
     def push_refresh(self, request, queryset):
         # pousse un snapshot vers les panneaux abonnés
         from .signals import snapshot_for_bec
+        import sys
+
+        print(
+            f"🚀 PUSH_REFRESH APPELE avec {queryset.count()} tireuse(s)",
+            file=sys.stderr,
+        )
 
         ch = get_channel_layer()
+        if not ch:
+            print("❌ ERREUR: channel_layer est None!", file=sys.stderr)
+            self.message_user(
+                request, "Erreur: channel_layer non disponible", level=messages.ERROR
+            )
+            return
+
         n = 0
         for tb in queryset:
             payload = snapshot_for_bec(tb)
-            async_to_sync(ch.group_send)(
-                f"rfid_state.{tb.uuid}",
-                {"type": "state.update", "payload": payload},
-            )
+            group_name = f"rfid_state.{tb.uuid}"
+            print(f"🚀 PUSH_REFRESH vers {group_name}: {payload}", file=sys.stderr)
+
+            try:
+                async_to_sync(ch.group_send)(
+                    group_name,
+                    {"type": "state_update", "payload": payload},
+                )
+                print(f"✅ Message envoye au groupe {group_name}", file=sys.stderr)
+            except Exception as e:
+                print(f"❌ ERREUR envoi au groupe {group_name}: {e}", file=sys.stderr)
+
+            # Envoyer aussi au groupe ALL pour l'interface admin
+            try:
+                async_to_sync(ch.group_send)(
+                    "rfid_state.all",
+                    {"type": "state_update", "payload": payload},
+                )
+                print(f"✅ Message envoye au groupe rfid_state.all", file=sys.stderr)
+            except Exception as e:
+                print(f"❌ ERREUR envoi au groupe all: {e}", file=sys.stderr)
+
             n += 1
         self.message_user(request, f"Snapshot poussé à {n} tireuse(s).")
 
     push_refresh.short_description = "Pousser une mise à jour au panneau"
+
+
+@admin.register(Debimetre)
+class DebitmetreAdmin(admin.ModelAdmin):
+    list_display = ("name", "flow_calibration_factor")
+    list_editable = ("flow_calibration_factor",)
 
 
 @admin.register(Card)

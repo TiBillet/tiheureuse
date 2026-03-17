@@ -115,17 +115,6 @@ def ping(request):
 @csrf_exempt
 def api_rfid_authorize(request):
     """Vérifie si une carte est autorisée et crée une session."""
-    # ----Debug---
-    print(f"👀 DATA REÇU DU PI rfid_authorize (Brut) : {request.body}")
-
-    # le Pi envoie du JSON
-    try:
-        data = json.loads(request.body)
-        print(f"👀 DATA DECODÉ : {data}")
-    except:
-        print("Pas de JSON valide")
-    # ---Fin Debug---
-
     # 1. Parsing des données reçues
     try:
         data = json.loads(request.body)
@@ -210,6 +199,27 @@ def api_rfid_authorize(request):
                 {"authorized": False, "error": "Aucun bec dispo"}, status=500
             )
 
+        # Calcul du volume max autorisé basé sur le solde de la carte
+        max_volume_ml = float(card.balance) * float(tireuse_bec.unit_ml)
+
+        # Plafonnement par le stock disponible (réserve)
+        # Si appliquer_reserve est activé, on ne peut pas servir plus que
+        # (reservoir_ml - seuil_mini_ml) pour préserver la réserve de fond de fût.
+        if tireuse_bec.appliquer_reserve and tireuse_bec.seuil_mini_ml > 0:
+            stock_disponible_ml = float(
+                tireuse_bec.reservoir_ml - tireuse_bec.seuil_mini_ml
+            )
+            if stock_disponible_ml <= 0:
+                # Stock épuisé sous le seuil : refus de service
+                return JsonResponse(
+                    {
+                        "authorized": False,
+                        "error": "Stock insuffisant (réserve atteinte)",
+                    },
+                    status=403,
+                )
+            max_volume_ml = min(max_volume_ml, stock_disponible_ml)
+
         # Création session
         open_session = RfidSession.objects.create(
             tireuse_bec=tireuse_bec,
@@ -222,6 +232,7 @@ def api_rfid_authorize(request):
             label_snapshot=card.label,
             unit_label_snapshot=tireuse_bec.unit_label,
             unit_ml_snapshot=tireuse_bec.unit_ml,
+            allowed_ml_session=max_volume_ml,
         )
     else:
         tireuse_bec = open_session.tireuse_bec
@@ -245,6 +256,11 @@ def api_rfid_authorize(request):
     _ws_push(tireuse_bec, payload_ws)
 
     # 6. Réponse HTTP au Pi
+    flow_factor = (
+        tireuse_bec.debimetre.flow_calibration_factor
+        if tireuse_bec.debimetre
+        else 6.5
+    )
     return JsonResponse(
         {
             "authorized": True,
@@ -253,11 +269,11 @@ def api_rfid_authorize(request):
             "liquid_label": tireuse_bec.liquid_label,
             "unit_label": tireuse_bec.unit_label,
             "unit_ml": float(tireuse_bec.unit_ml),
+            "flow_calibration_factor": flow_factor,
         }
     )
 
 
-@csrf_exempt
 @csrf_exempt
 def api_rfid_event(request):
     """
@@ -276,7 +292,7 @@ def api_rfid_event(request):
 
     # Gestion UID (parfois brut, parfois nettoyé, on sécurise)
     raw_uid = data.get("uid", "")
-    uid = raw_uid.upper().replace(":", "").replace(" ", "")  # _norm_uid simplifié
+    uid = _norm_uid(raw_uid)
 
     event_data = data.get("data", {})
     session_id = event_data.get("session_id")
@@ -285,11 +301,14 @@ def api_rfid_event(request):
     volume_float = float(event_data.get("volume_ml", 0.0))
     current_vol = Decimal(f"{volume_float}").quantize(Decimal("0.01"))
 
-    # Initialisation de la variable tireuse_bec
-    # tireuse_bec = None
+    # Débit instantané transmis par le Pi (L/min), maintenant alimenté par FlowMeter.update()
+    debit_l_min = float(event_data.get("debit_l_min", 0.0))
+
+    # Initialisation des variables
     target_uuid_raw = data.get("tireuse_bec") or data.get("tireuse_id")
     tireuse_bec = None
     session = None
+    solde_epuise = False  # Variable pour suivre si le solde est épuisé
 
     # 1. ESSAYER DE TROUVER LA SESSION (Cas start, update, end)
     if session_id:
@@ -320,25 +339,47 @@ def api_rfid_event(request):
     # =========================================================================
 
     # --- CAS 1 : IDENTIFIANT REFUSÉ / CARTE REMIS EN ROUGE ---
+    # NOTE: Le WebSocket est déjà envoyé par api_rfid_authorize avec le bon message
+    # On ne fait rien ici pour éviter le doublon "Carte inconnue" puis "Non autorisé"
     if event_type == "auth_fail":
-        message = data.get("message", "Non autorisé")
-        print(f"EVENT AUTH_FAIL reçu pour {tireuse_bec.name}")
-        _ws_push(
-            tireuse_bec,
-            {
-                "tireuse_bec": tireuse_bec.name,
-                "tireuse_bec_uuid": str(tireuse_bec.uuid),
-                "present": True,
-                "authorized": False,
-                "vanne_ouverte": False,
-                "uid": uid,
-                "message": message,
-            },
-        )
+        print(f"🔴 AUTH_FAIL reçu mais ignoré (déjà géré par api_rfid_authorize)")
         return JsonResponse({"status": "ok"})
 
     # --- CAS 2 : RETRAIT CARTE (RESET ECRAN) ---
     if event_type == "card_removed":
+        # Récupérer la dernière session pour avoir le volume servi et le solde
+        last_session = (
+            RfidSession.objects.filter(uid=uid, tireuse_bec=tireuse_bec)
+            .order_by("-started_at")
+            .first()
+        )
+
+        # Calculer le volume servi et le solde restant
+        volume_served = 0.0
+        remaining_balance = None
+        if last_session:
+            volume_served = float(last_session.volume_delta_ml or 0)
+            if last_session.card:
+                # Calculer le solde restant (après facturation si terminé)
+                if last_session.ended_at:
+                    remaining_balance = str(last_session.card.balance)
+                else:
+                    # Session non terminée, calculer solde estimé
+                    unit_ml = last_session.unit_ml_snapshot or Decimal("100.0")
+                    if unit_ml > 0 and volume_served > 0:
+                        units_consumed = (
+                            Decimal(str(volume_served)) / unit_ml
+                        ).quantize(Decimal("0.01"))
+                        remaining = last_session.card.balance - units_consumed
+                        if remaining < 0:
+                            remaining = Decimal("0.00")
+                        remaining_balance = str(remaining)
+                    else:
+                        remaining_balance = str(last_session.card.balance)
+
+        print(
+            f"🍺 ENVOI CARD_REMOVED - Volume: {volume_served}ml, Solde: {remaining_balance}"
+        )
         _ws_push(
             tireuse_bec,
             {
@@ -346,8 +387,12 @@ def api_rfid_event(request):
                 "tireuse_bec_uuid": str(tireuse_bec.uuid),
                 "present": False,
                 "uid": "",
-                "message": "En attente...",
+                "message": f"Terminé - Reste: {remaining_balance or '0.00'}€"
+                if volume_served > 0
+                else "En attente...",
                 "authorized": False,
+                "volume_ml": volume_served,
+                "balance": remaining_balance or "0.00",
             },
         )
         return JsonResponse({"status": "ok"})
@@ -367,6 +412,7 @@ def api_rfid_event(request):
     # A. Début de versage
     if event_type == "pour_start":
         # On informe juste l'écran (Vert)
+        start_balance = str(session.card.balance) if session.card else "0.00"
         _ws_push(
             tireuse_bec,
             {
@@ -376,9 +422,9 @@ def api_rfid_event(request):
                 "authorized": True,
                 "uid": uid,
                 "liquid_label": session.liquid_label_snapshot,
-                "balance": str(session.card.balance) if session.card else "0.00",
+                "balance": start_balance,
                 "volume_ml": 0.0,
-                "message": "Servez-vous !",
+                "message": f"Servez-vous ! Solde: {start_balance}€",
             },
         )
 
@@ -410,10 +456,36 @@ def api_rfid_event(request):
             session.volume_delta_ml = current_vol  # Le volume accumulé venant du Pi
             session.last_message = f"Volume: {current_vol} ml"
 
-            # 3. Fin de session (FACTURATION)
+            # Vérification solde épuisé pendant le service
+            solde_epuise = False
+            if session.card and session.allowed_ml_session:
+                if current_vol >= float(session.allowed_ml_session):
+                    solde_epuise = True
+                    session.last_message = "Solde épuisé - Vanne fermée"
+                    print(
+                        f"⚠️ SOLDE ÉPUISÉ pour {uid} - Volume: {current_vol}ml, Max: {session.allowed_ml_session}ml"
+                    )
+
+            # 3. Calcul du solde estimé restant pendant le service
+            # (avant la facturation finale)
+            estimated_balance = str(session.card.balance) if session.card else "0.00"
+            if session.card and current_vol > 0:
+                unit_ml = session.unit_ml_snapshot or Decimal("100.0")
+                if unit_ml > 0:
+                    units_consumed = (current_vol / unit_ml).quantize(
+                        Decimal("0.01"), rounding=ROUND_HALF_UP
+                    )
+                    remaining = session.card.balance - units_consumed
+                    if remaining < 0:
+                        remaining = Decimal("0.00")
+                    estimated_balance = str(remaining)
+
+            # 4. Fin de session (FACTURATION)
             session_done = False
             charged_display = "0.00"
-            balance_display = str(session.card.balance) if session.card else "0.00"
+            balance_display = (
+                estimated_balance  # Utiliser le solde estimé pour l'affichage
+            )
 
             if event_type == "pour_end":
                 session.ended_at = timezone.now()
@@ -449,32 +521,41 @@ def api_rfid_event(request):
             # 2. On construit le nom du groupe EXACTEMENT comme dans consumers.py
             group_name = f"rfid_state.{tireuse_bec.uuid}"
 
-            # 3. On prépare les données (le payload)
+            # 3. On prépare les données
+            # Si solde épuisé, on force la fermeture de la vanne
+            vanne_ouverte = True
+            force_close = False
+            if solde_epuise:
+                vanne_ouverte = False
+                force_close = True
+
             data_to_send = {
                 "tireuse_bec": tireuse_bec.name,
                 "tireuse_bec_uuid": str(tireuse_bec.uuid),
                 "present": True if not session_done else False,
                 "authorized": True,
-                "vanne_ouverte": True,
-                "session_done": session_done,
+                "vanne_ouverte": vanne_ouverte,
+                "force_close": force_close,
+                "session_done": session_done or solde_epuise,
                 "uid": uid,
                 "liquid_label": session.liquid_label_snapshot or "Bière",
                 "volume_ml": float(current_vol),
+                "debit_l_min": debit_l_min,
                 "charged": charged_display,
                 "balance": balance_display,
                 "reservoir_ml": float(tireuse_bec.reservoir_ml),
                 "message": f"Terminé : {current_vol:.0f} ml"
                 if session_done
-                else "Service en cours...",
+                else ("Solde épuisé !" if solde_epuise else "Service en cours..."),
             }
 
-            # 4. On envoie. IMPORTANT :
+            # 4. On envoie.
             # - "type" doit correspondre au nom de la méthode dans Consumer (`async def state_update`)
             # - Le consumer attend les données dans une clé "payload"
             print(f"🚀 ENVOI WS vers '{tireuse_bec.name}' ET vers 'ALL'")
 
             # 1. Envoi au canal SPÉCIFIQUE (pour l'écran du Pi)
-            # ex: rfid_state.narval
+
             async_to_sync(channel_layer.group_send)(
                 f"rfid_state.{tireuse_bec.uuid}",
                 {"type": "state_update", "payload": data_to_send},
@@ -485,4 +566,10 @@ def api_rfid_event(request):
                 "rfid_state.all", {"type": "state_update", "payload": data_to_send}
             )
 
-    return JsonResponse({"status": "ok"})
+    # Réponse au Pi avec indication si fermeture forcée nécessaire
+    response_data = {"status": "ok"}
+    if solde_epuise:
+        response_data["force_close"] = True
+        response_data["message"] = "Solde epuise - Fermeture vanne requise"
+
+    return JsonResponse(response_data)

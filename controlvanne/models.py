@@ -30,6 +30,20 @@ class Card(models.Model):
         return self.label or self.uid
 
 
+class Debimetre(models.Model):
+    name = models.CharField(
+        max_length=100,
+        help_text="Modèle du débitmètre (ex: YF-S201, FS300A)",
+    )
+    flow_calibration_factor = models.FloatField(
+        default=6.5,
+        help_text="Facteur de calibration (Hz par L/min) — 1 L = facteur × 60 impulsions",
+    )
+
+    def __str__(self):
+        return f"{self.name} (factor={self.flow_calibration_factor})"
+
+
 class TireuseBec(models.Model):
     uuid = models.UUIDField(default=uuid4, primary_key=True, editable=False)
 
@@ -56,8 +70,14 @@ class TireuseBec(models.Model):
         help_text="Millilitres par unité (ex: 100.00 ml = 10 cL)",
     )
 
-    # TODO faire une classe par constructeur
-    # TODO : Récupérer le FlowRate a travers foreignKey constructeur gere cote django
+    debimetre = models.ForeignKey(
+        "Debimetre",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="tireuses",
+        help_text="Débitmètre associé (détermine le facteur de calibration)",
+    )
 
     # TODO: Esce utile ? a supprimer si non
     agent_base_url = models.CharField(
@@ -138,11 +158,15 @@ class RfidSession(models.Model):
             return None
         return (self.ended_at - self.started_at).total_seconds()
 
-    def close_with_volume(self, end_volume_ml: float):
-        """Clôt la session et calcule le delta (>=0)."""
+    def close_with_volume(self, served_volume_ml: float):
+        """
+        Clôt la session avec le volume cumulatif servi depuis le début de la session.
+        `served_volume_ml` est le volume total versé (Pi: flow_meter.volume_l()*1000 - session_start_vol),
+        cohérent avec ce que views.py stocke dans volume_delta_ml.
+        """
         self.ended_at = timezone.now()
-        self.volume_end_ml = float(end_volume_ml or 0.0)
-        self.volume_delta_ml = max(0.0, self.volume_end_ml - self.volume_start_ml)
+        self.volume_delta_ml = max(0.0, float(served_volume_ml or 0.0))
+        self.volume_end_ml = self.volume_delta_ml
         self.save()
 
     def __str__(self):

@@ -44,6 +44,13 @@
               <span>Volume (ml)</span>
               <span class="stat" id="vol-{{ b.uuid }}">0</span>
             </div>
+            
+            <div class="mt-3 text-center" style="font-size:20px;color:#2c3e50">
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 16 16" style="vertical-align: middle; margin-bottom: 3px;">
+               <path d="M0 4a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V4zm2-1a1 1 0 0 0-1 1v1h14V4a1 1 0 0 0-1-1H2zm13 4H1v5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V7z"/>
+               <path d="M2 10a1 1 0 0 1 1-1h1a1 1 0 0 1 1 1v1a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1v-1z"/>
+            </svg> Solde: <b id="balance-{{ b.uuid }}" style="color:#27ae60">—</b> €
+            </div>
           </div>
 
           <div class="card-footer">
@@ -77,9 +84,39 @@
       vol: document.getElementById('vol-'+uuid),
       msg: document.getElementById('msg-'+uuid),
       liquid: document.getElementById('liquid-'+uuid),
+      balance: document.getElementById('balance-'+uuid),
+      lastBalance: null,
+      wasPresent: false,
       container: card // Utile pour debugging visuel eventuel
     };
   });
+  
+  // Créer le popup global
+  let popup = document.getElementById('global-popup');
+  if (!popup) {
+    popup = document.createElement('div');
+    popup.id = 'global-popup';
+    popup.style.cssText = 'display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#2c3e50;color:white;padding:30px;border-radius:15px;text-align:center;z-index:9999;box-shadow:0 10px 40px rgba(0,0,0,0.3)';
+    popup.innerHTML = `
+      <div style="font-size:48px;margin-bottom:10px">🍺</div>
+      <div style="font-size:20px;margin-bottom:10px">Bonne dégustation !</div>
+      <div style="font-size:16px">Il vous reste <b id="popup-balance">—</b> € sur votre carte</div>
+    `;
+    document.body.appendChild(popup);
+  }
+  
+  let popupTimeout = null;
+  function showPopup(balance) {
+    console.log('🍺 AFFICHAGE POPUP - Solde:', balance);
+    const popupBalance = document.getElementById('popup-balance');
+    if (popupBalance) popupBalance.textContent = balance;
+    popup.style.display = 'block';
+    popup.style.opacity = '1';
+    if (popupTimeout) clearTimeout(popupTimeout);
+    popupTimeout = setTimeout(() => {
+      popup.style.display = 'none';
+    }, 5000);
+  }
 
   // Fonction de Remise à Zéro (Mode gris)
   function resetCardUI(c) {
@@ -97,6 +134,9 @@
     c.flowbar.style.width = '0%';
     c.vol.textContent = '0';
     c.msg.textContent = 'Posez votre badge...';
+    
+    // Reset solde
+    c.balance.textContent = '—';
   }
 
   // Helper Couleurs
@@ -137,11 +177,14 @@
           }
 
           targets.forEach(c => {
-
+              // Sauvegarder l'état précédent
+              const wasPresent = c.wasPresent;
+              
               // -------------------------------------------------
               // CAS 1 : Carte présente sur le lecteur
               // -------------------------------------------------
               if (payload.present) {
+                  c.wasPresent = true;
                   c.uid.textContent = payload.uid || 'Lu...';
 
                   // Autorisation (Vert ou Rouge)
@@ -162,10 +205,19 @@
                   const flowPct = Math.min((payload.debit_l_min || 0) * 10, 100);
                   c.flowbar.style.width = flowPct + '%';
                   c.vol.textContent = (payload.volume_ml || 0).toFixed(0);
+                  
+                  // Afficher le solde
+                  if (payload.balance) {
+                      c.balance.textContent = payload.balance;
+                      c.lastBalance = payload.balance;
+                  }
 
                   if (payload.message) c.msg.textContent = payload.message;
+                  
                   return;
               }
+              
+              c.wasPresent = false;
 
               // -------------------------------------------------
               // CAS 2 : Fin de session (avec un rapport final)
@@ -177,23 +229,41 @@
                   c.state.className = 'badge bg-danger';
                   c.state.textContent = 'Fermée';
 
-                  c.vol.textContent = (payload.session_volume_ml || 0).toFixed(0);
+                  c.vol.textContent = (payload.volume_ml || 0).toFixed(0);
+                  
+                  // Mettre à jour le solde final
+                  if (payload.balance) {
+                      c.balance.textContent = payload.balance;
+                      c.lastBalance = payload.balance;
+                  }
+                  
                   if (payload.message) c.msg.textContent = payload.message;
 
-                  // On efface tout après 4 secondes
-                  setTimeout(() => resetCardUI(c), 4000);
+                  // Afficher le popup de fin de service UNIQUEMENT si on a servi quelque chose
+                  const finalVolume = parseFloat(payload.volume_ml || 0);
+                  if (c.lastBalance && finalVolume > 0) {
+                      showPopup(c.lastBalance);
+                  }
+
+                  // On efface tout après 5 secondes (laisser le temps de voir le popup)
+                  setTimeout(() => resetCardUI(c), 5000);
                   return;
               }
 
               // -------------------------------------------------
-              // CAS 3 : RETRAIT DE CARTE / PAS DE SESSION
+              // CAS 3 : RETRAIT DE CARTE / PAS DE SESSION (carte refusée ou retirée sans servir)
               // -------------------------------------------------
-              // Si on arrive ici, c'est que present=false et session_done=false.
-              // C'est le cas : "J'ai retiré la carte sans verser" OU "Carte inconnue retirée".
-              // ACTION : On efface tout, tout de suite.
-
+              console.log('🔄 REINITIALISATION CARTE RETIREE - WasPresent:', wasPresent, 'Message:', payload.message);
+              
+              // Réinitialiser complètement l'interface
               resetCardUI(c);
+              
+              // Forcer explicitement la réinitialisation de l'autorisation
+              c.auth.className = 'badge bg-secondary';
+              //c.auth.textContent = 'En attente';
               if (payload.message) c.msg.textContent = payload.message;
+              c.msg.textContent = 'En attente...';
+              c.balance.textContent = '—';
           });
 
       } catch(e) { console.error("Erreur WS JS:", e); }

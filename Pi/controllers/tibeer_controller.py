@@ -6,7 +6,9 @@ from hardware.rfid_reader import RFIDReader
 from hardware.valve import Valve
 from hardware.flow_meter import FlowMeter
 from network.backend_client import BackendClient
+from ui.ui_server import update_display
 from utils.logger import logger
+from utils.exceptions import BackendError, RFIDReadError
 
 # Paramètres
 CARD_GRACE_PERIOD_S = (
@@ -34,11 +36,16 @@ class TibeerController:
 
     def run(self):
         logger.info("Service TiBeer démarré. En attente de badge...")
+        update_display("Scannez votre badge", color="blue")
 
         try:
             while self.running:
                 uid = self.rfid.read_uid()
                 now = time.time()
+
+                # Mise à jour du débitmètre à chaque itération pour avoir
+                # current_flow_rate et volume_total_ml à jour en continu
+                self.flow_meter.update()
 
                 if uid:
                     # --- UNE CARTE EST PRÉSENTE ---
@@ -76,11 +83,24 @@ class TibeerController:
     def _handle_new_session(self, uid):
         """Vérifie le badge et décide de l'ouvrir ou de rejeter"""
         # 1. Demande au backend
-        auth_response = self.client.authorize(uid)
+        try:
+            auth_response = self.client.authorize(uid)
+        except BackendError as e:
+            logger.error(f"Erreur backend lors de l'autorisation : {e}")
+            update_display("Erreur réseau", color="red")
+            self.is_serving = False
+            self.session_id = None
+            return
 
         if auth_response.get("authorized") is True:
             # --- CAS 1 : AUTORISÉ (VERT) ---
             self.session_id = auth_response.get("session_id")
+            balance = auth_response.get("balance", "--")
+
+            # Mise à jour du facteur de calibration depuis la config Django
+            flow_factor = auth_response.get("flow_calibration_factor")
+            if flow_factor is not None:
+                self.flow_meter.set_calibration_factor(flow_factor)
 
             # Reset débitmètre (snapshot)
             self.session_start_vol = self.flow_meter.volume_l() * 1000.0
@@ -91,7 +111,12 @@ class TibeerController:
 
             logger.info(f"Autorisation OK. Session {self.session_id}. Vanne ouverte.")
 
-            # Affichage VERT
+            # Affichage VERT (kiosk Flask local)
+            update_display(
+                f"Servez-vous ! Solde: {balance}", color="green", balance=balance
+            )
+
+            # Affichage VERT (dashboard Django WebSocket)
             self.client.send_event("pour_start", self.current_uid, self.session_id)
             self.last_update_ts = time.time()
 
@@ -103,20 +128,49 @@ class TibeerController:
             self.is_serving = False
             self.session_id = None
 
+            # Affichage ROUGE (kiosk Flask local)
+            update_display(error_msg, color="red")
 
             self.client.send_event(
                 "auth_fail", self.current_uid, None, {"message": error_msg}
             )
 
     def _handle_pouring_loop(self, now):
-        """Gestion du débit pendant le service"""
+        # Gestion du débit pendant le service
         if (now - self.last_update_ts) > UPDATE_INTERVAL_S:
             current_total_vol = self.flow_meter.volume_l() * 1000.0
             served_vol = current_total_vol - self.session_start_vol
+            flow_rate = self.flow_meter.get_flow_rate()
 
-            self.client.send_event(
-                "pour_update", self.current_uid, self.session_id, served_vol
-            )
+            # Envoyer l'event et vérifier la réponse
+            try:
+                response = self.client.send_event(
+                    "pour_update",
+                    self.current_uid,
+                    self.session_id,
+                    {"volume_ml": served_vol, "debit_l_min": flow_rate},
+                )
+            except BackendError as e:
+                logger.warning(
+                    f"Erreur backend lors de pour_update (on continue) : {e}"
+                )
+                self.last_update_ts = now
+                return
+
+            # Vérifier si fermeture forcée demandée par le serveur
+            if response and response.get("force_close"):
+                logger.warning("⚠️ SOLDE ÉPUISÉ - Fermeture vanne")
+                self._end_session_actions()
+                # Envoyer l'event de fin
+                self.client.send_event(
+                    "pour_end",
+                    self.current_uid,
+                    self.session_id,
+                    {"volume_ml": served_vol, "debit_l_min": flow_rate},
+                )
+                self.is_serving = False
+                return
+
             self.last_update_ts = now
 
     def _handle_card_removal(self):
@@ -124,9 +178,12 @@ class TibeerController:
         if self.is_serving:
             # Fin de service normale (BLEU)
             self._end_session_actions()
-        else:
-            # Retrait d'une carte refusée ou inactive (GRIS)
-            self.client.send_event("card_removed", self.current_uid, None)
+
+        # Envoyer card_removed pour déclencher le popup (toujours)
+        self.client.send_event("card_removed", self.current_uid, None)
+
+        # Retour en attente (kiosk Flask local)
+        update_display("Scannez votre badge", color="blue")
 
         self.current_uid = None
         self.session_id = None
@@ -142,7 +199,10 @@ class TibeerController:
 
             logger.info(f"Envoi rapport fin. Volume: {served_vol:.1f} ml")
             self.client.send_event(
-                "pour_end", self.current_uid, self.session_id, served_vol
+                "pour_end",
+                self.current_uid,
+                self.session_id,
+                {"volume_ml": served_vol, "debit_l_min": 0.0},
             )
 
         self.is_serving = False

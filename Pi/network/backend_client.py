@@ -1,12 +1,11 @@
 import requests
 import json
-import os
+from config.settings import BACKEND_HOST, BACKEND_PORT, BACKEND_API_KEY, TIREUSE_BEC
 from utils.logger import logger
+from utils.exceptions import BackendError
 
 # --- CONFIGURATION ---
-API_URL = os.getenv("API_URL", "http://192.168.1.10:8000")
-BACKEND_API_KEY = os.getenv("BACKEND_API_KEY", "changeme")
-TIREUSE_BEC = os.getenv("TIREUSE_BEC", "CHANGER_CI")
+API_URL = f"http://{BACKEND_HOST}:{BACKEND_PORT}"
 TIMEOUT = 2.0
 
 
@@ -21,7 +20,7 @@ class BackendClient:
 
     def authorize(self, uid: str) -> dict:
         """
-        Interroge seulement Django.
+        Interroge Django.
         Renvoie un dictionnaire avec 'authorized': True/False et le reste des infos.
         """
         url = f"{self.base_url}/authorize"
@@ -52,11 +51,14 @@ class BackendClient:
 
         except Exception as e:
             logger.error(f"Erreur réseau authorize: {e}")
-            return {"authorized": False, "error": "Erreur Réseau"}
+            raise BackendError(
+                f"Impossible de joindre le backend pour l'autorisation : {e}"
+            ) from e
 
     def send_event(self, event_type, uid, session_id=None, data=None):
         """
         Envoie un événement (start, update, end, auth_fail).
+        Retourne la réponse du serveur (dict) ou None en cas d'erreur.
         """
         # 1. Préparation des données data/inner
         inner_data = {}
@@ -85,8 +87,14 @@ class BackendClient:
             url = f"{self.base_url}/event/"
             res = requests.post(url, json=payload, headers=self.headers, timeout=to)
 
-            if res.status_code != 200:
+            if res.status_code == 200:
+                return res.json()
+            else:
                 logger.error(f"Erreur API Event ({res.status_code}): {res.text}")
+                return None
 
         except Exception as e:
             logger.error(f"Echec envoi event {event_type}: {e}")
+            raise BackendError(
+                f"Impossible d'envoyer l'event '{event_type}' : {e}"
+            ) from e

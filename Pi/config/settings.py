@@ -5,7 +5,7 @@ from pathlib import Path
 # --- Chargement des variables d'environnement ---
 load_dotenv()
 
-API_KEY = os.getenv("API_KEY", "change_moi")
+BACKEND_API_KEY = os.getenv("BACKEND_API_KEY", "changeme")
 TIREUSE_BEC = os.getenv("TIREUSE_BEC", "CHANGER_CI")
 # --- Chemins et répertoires ---
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -17,14 +17,16 @@ RFID_DEVICE = os.getenv("RFID_DEVICE", "serial0")  # Port série pour VMA405
 RFID_TIMEOUT = float(os.getenv("RFID_TIMEOUT", "1.0"))  # Timeout en secondes
 
 # --- Configuration Vanne ---
-VALVE_GPIO_PIN = int(os.getenv("VALVE_GPIO_PIN", "12"))  # Pin GPIO pour la vanne
+# Utilise GPIO_VANNE pour correspondre au nom lu par hardware/valve.py
+GPIO_VANNE = int(os.getenv("GPIO_VANNE", "12"))
 VALVE_ACTIVE_HIGH = os.getenv("VALVE_ACTIVE_HIGH", "False").lower() == "true"
 
 # --- Configuration Débitmètre ---
 FLOW_CALIBRATION_FACTOR = float(
     os.getenv("FLOW_CALIBRATION_FACTOR", "6.5")
 )  # Impulsions/L
-FLOW_GPIO_PIN = int(os.getenv("FLOW_GPIO_PIN", "16"))  # Pin GPIO pour le débitmètre
+# Utilise GPIO_FLOW_SENSOR pour correspondre au nom lu par hardware/flow_meter.py
+GPIO_FLOW_SENSOR = int(os.getenv("GPIO_FLOW_SENSOR", "16"))
 
 # --- Configuration Backend ---
 BACKEND_HOST = os.getenv("BACKEND_HOST", "localhost")

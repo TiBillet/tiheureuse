@@ -21,6 +21,7 @@ def snapshot_for_bec(tb: TireuseBec):
     )
     return {
         "tireuse_bec": tb.name,
+        "tireuse_bec_uuid": str(tb.uuid),
         "liquid_label": tb.liquid_label,
         "present": bool(open_s and open_s.uid),
         "authorized": bool(open_s.authorized) if open_s else False,
@@ -48,30 +49,21 @@ def _remember_old_name(sender, instance: TireuseBec, **kwargs):
 def on_tireusebec_changed(sender, instance: TireuseBec, created, **kwargs):
     payload = snapshot_for_bec(instance)
     ch = get_channel_layer()
-#    new_safe = _safe(instance.name)
+
+    # Envoi au canal spécifique de cette tireuse
     async_to_sync(ch.group_send)(
-        f"rfid_state.{instance.uuid}", {"type": "state.update", "payload": payload}
+        f"rfid_state.{instance.uuid}", {"type": "state_update", "payload": payload}
     )
 
+    # Envoi au canal général (dashboard admin)
     async_to_sync(ch.group_send)(
-        "rfid_state.all", {"type": "state.update", "payload": payload}
+        "rfid_state.all", {"type": "state_update", "payload": payload}
     )
 
+    # Si renommage : notifier les écrans encore abonnés à l'ancien nom
     old_name = getattr(instance, "_old_name", None)
     if old_name and old_name != instance.name:
         async_to_sync(ch.group_send)(
             f"rfid_state.{instance.uuid}",
-            {"type": "state.update", "payload": {"redirect_to": instance.name}},
-        )
-
-    async_to_sync(ch.group_send)(
-        "rfid_state.all", {"type": "state.update", "payload": payload}
-    )
-
-    # si rename: pousser aussi vers l'ancien groupe (pour écrans encore abonnés)
-    old_slug = getattr(instance, "_old_slug", None)
-    if old_slug and old_slug != instance.slug:
-        async_to_sync(ch.group_send)(
-            f"rfid_state.{_safe(old_slug)}",
-            {"type": "state.update", "payload": {"redirect_to": instance.slug}},
+            {"type": "state_update", "payload": {"redirect_to": instance.name}},
         )
