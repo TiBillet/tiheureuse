@@ -61,7 +61,7 @@ DJANGO_SERVER=${DJANGO_SERVER%/}
 echo "   -> Utilisation de : $DJANGO_SERVER"
 
 # --- Demande Nom Tireuse ---
-read -p "🔹 Nom de la tireuse (slug) [Défaut: $DEFAULT_TIREUSE_ID] : " TIREUSE_BEC
+read -p "🔹 Nom de la tireuse (UUID) [Défaut: $DEFAULT_TIREUSE_ID] : " TIREUSE_BEC
 TIREUSE_BEC=${TIREUSE_BEC:-$DEFAULT_TIREUSE_ID}
 
 # 2.2 SSH GitHub
