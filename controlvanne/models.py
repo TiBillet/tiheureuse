@@ -59,7 +59,7 @@ class TireuseBec(models.Model):
 
     nom_tireuse = models.CharField(max_length=50, help_text="Nom affiché: ex. 'Bière', 'Soft'")
 
-    enabled = models.BooleanField(default=True)
+    enabled = models.BooleanField("En service", default=True)
     notes = models.CharField(max_length=200, blank=True)
 
     # TODO: a supprimer ? Remplacer par une foreignKey Produit qui comporte le nom et le prix/litre

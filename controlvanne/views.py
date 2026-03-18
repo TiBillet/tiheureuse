@@ -136,7 +136,35 @@ def api_rfid_authorize(request):
 
     uid = _norm_uid(uid_raw)
 
-    # 3. Vérification Carte
+    # 3. Recherche de la tireuse EN PREMIER (avant la carte)
+    tireuse_bec = TireuseBec.objects.filter(uuid=target_uuid).first()
+    if not tireuse_bec:
+        tireuse_bec = TireuseBec.objects.filter(enabled=True).first()
+    if not tireuse_bec:
+        return JsonResponse({"authorized": False, "error": "Aucun bec dispo"}, status=500)
+
+    # --- CAS MAINTENANCE : tireuse hors service ---
+    if not tireuse_bec.enabled:
+        # On cherche la carte (peu importe si active ou non) pour afficher le solde
+        any_card = Card.objects.filter(uid__iexact=uid).first()
+        if any_card:
+            balance_display = str(any_card.balance)
+        else:
+            balance_display = "—"
+        _ws_push(tireuse_bec, {
+            "tireuse_bec": tireuse_bec.nom_tireuse,
+            "tireuse_bec_uuid": str(tireuse_bec.uuid),
+            "maintenance": True,
+            "present": True,
+            "authorized": False,
+            "vanne_ouverte": False,
+            "uid": uid,
+            "balance": balance_display,
+            "message": "En Maintenance",
+        })
+        return JsonResponse({"authorized": False, "error": "Tireuse en maintenance"}, status=403)
+
+    # 4. Vérification Carte (seulement si tireuse en service)
     card = Card.objects.filter(uid__iexact=uid, is_active=True).first()
 
     # --- CAS ERREUR : CARTE INCONNUE / EXPIRÉE ---
@@ -146,10 +174,10 @@ def api_rfid_authorize(request):
 
         # affichage Rouge :
         _ws_push(
-            target_uuid,
+            tireuse_bec,
             {
-                "tireuse_bec": target_uuid,
-                "tireuse_bec_uuid": target_uuid,
+                "tireuse_bec": tireuse_bec.nom_tireuse,
+                "tireuse_bec_uuid": str(tireuse_bec.uuid),
                 "present": True,
                 "authorized": False,  # Rouge
                 "vanne_ouverte": False,
@@ -165,10 +193,10 @@ def api_rfid_authorize(request):
         print(f"⛔ REFUS {uid} : {msg}")
 
         _ws_push(
-            target_uuid,
+            tireuse_bec,
             {
-                "tireuse_bec": target_uuid,
-                "tireuse_bec_uuid": target_uuid,
+                "tireuse_bec": tireuse_bec.nom_tireuse,
+                "tireuse_bec_uuid": str(tireuse_bec.uuid),
                 "present": True,
                 "authorized": False,  # Rouge
                 "vanne_ouverte": False,
@@ -179,25 +207,10 @@ def api_rfid_authorize(request):
         )
         return JsonResponse({"authorized": False, "error": msg}, status=403)
 
-    # 4. Gestion de la Session (Succès)
+    # 5. Gestion de la Session (Succès)
     open_session = RfidSession.objects.filter(card=card, ended_at__isnull=True).first()
 
     if not open_session:
-        # On cherche la tireuse correspondant à l'UUID envoyé par le Pi
-        tireuse_bec = TireuseBec.objects.filter(uuid=target_uuid).first()
-
-        # Fallback si UUID inconnu, chercher par nom
-        if not tireuse_bec:
-            tireuse_bec = TireuseBec.objects.filter(name__iexact=target_uuid).first()
-
-        # Dernier recours
-        if not tireuse_bec:
-            tireuse_bec = TireuseBec.objects.filter(enabled=True).first()
-
-        if not tireuse_bec:
-            return JsonResponse(
-                {"authorized": False, "error": "Aucun bec dispo"}, status=500
-            )
 
         # Calcul du volume max autorisé basé sur le solde de la carte
         max_volume_ml = float(card.balance) * float(tireuse_bec.unit_ml)
@@ -346,6 +359,18 @@ def api_rfid_event(request):
         return JsonResponse({"status": "ok"})
 
     # --- CAS 2 : RETRAIT CARTE (RESET ECRAN) ---
+    if event_type == "card_removed" and not tireuse_bec.enabled:
+        _ws_push(tireuse_bec, {
+            "tireuse_bec": tireuse_bec.nom_tireuse,
+            "tireuse_bec_uuid": str(tireuse_bec.uuid),
+            "maintenance": True,
+            "present": False,
+            "authorized": False,
+            "vanne_ouverte": False,
+            "message": "En Maintenance",
+        })
+        return JsonResponse({"status": "ok"})
+
     if event_type == "card_removed":
         # Récupérer la dernière session pour avoir le volume servi et le solde
         last_session = (

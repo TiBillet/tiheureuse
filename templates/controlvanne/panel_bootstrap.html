@@ -165,6 +165,29 @@
           if (payload.kiosk_url) { window.location.href = payload.kiosk_url; return; }
           if (payload.kiosk_reload) { window.location.reload(); return; }
 
+          // Maintenance
+          if (payload.maintenance) {
+              const uuid = payload.tireuse_bec_uuid || '';
+              const c = cards[uuid] || Object.values(cards)[0];
+              if (c) {
+                  c.state.className = 'badge bg-warning text-dark';
+                  c.state.textContent = 'Maintenance';
+                  c.auth.className = 'badge bg-warning text-dark';
+                  c.auth.textContent = 'Hors service';
+                  c.msg.textContent = 'En Maintenance';
+                  if (payload.uid) {
+                      c.uid.textContent = payload.uid;
+                  } else {
+                      c.uid.innerHTML = '&mdash;';
+                  }
+                  c.flow.textContent = '0.00';
+                  c.flowbar.style.width = '0%';
+                  c.vol.textContent = '0';
+                  c.balance.textContent = (payload.balance !== undefined) ? payload.balance : '—';
+              }
+              return;
+          }
+
           // Identification de la cible par UUID
           const targetUuid = payload.tireuse_bec_uuid || payload.tireuse_bec || '';
 

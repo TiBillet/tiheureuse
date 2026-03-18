@@ -54,6 +54,17 @@ class PanelConsumer(AsyncJsonWebsocketConsumer):
                 "message": "",
             }
 
+        if not tb.enabled:
+            return {
+                "tireuse_bec": tb.nom_tireuse,
+                "tireuse_bec_uuid": str(tb.uuid),
+                "maintenance": True,
+                "present": False,
+                "authorized": False,
+                "vanne_ouverte": False,
+                "message": "En Maintenance",
+            }
+
         open_s = (
             RfidSession.objects.filter(tireuse_bec=tb, ended_at__isnull=True)
             .order_by("-started_at")
