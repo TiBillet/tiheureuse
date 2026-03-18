@@ -5,6 +5,25 @@ from django.utils import timezone
 from decimal import Decimal
 
 
+class CarteMaintenance(models.Model):
+    uid = models.CharField("UID", max_length=32, unique=True,
+                           help_text="UID hex sans espaces")
+    label = models.CharField("Nom", max_length=100, blank=True)
+    is_active = models.BooleanField("Active", default=True)
+    produit = models.CharField(
+        "Produit de nettoyage", max_length=100, blank=True,
+        help_text="Ex : Eau, Désinfectant, Alcool isopropylique…",
+    )
+    notes = models.TextField("Notes", blank=True)
+
+    class Meta:
+        verbose_name = "Carte maintenance"
+        verbose_name_plural = "Cartes maintenance"
+
+    def __str__(self):
+        return self.label or self.uid
+
+
 class Card(models.Model):
     uid = models.CharField(max_length=32, unique=True, help_text="UID hex sans espaces")
     label = models.CharField("Nom carte", max_length=100, blank=True)
@@ -86,6 +105,13 @@ class Fut(models.Model):
         blank=True,
         help_text="Prix d'achat du fût (facultatif)",
     )
+    prix_litre = models.DecimalField(
+        "Prix au litre (€)",
+        max_digits=8,
+        decimal_places=2,
+        default=Decimal("10.00"),
+        help_text="Prix de vente par litre pour ce fût",
+    )
 
     class Meta:
         verbose_name = "Fût"
@@ -114,13 +140,23 @@ class TireuseBec(models.Model):
         help_text="Nom de l'unité de solde (ex: patate)",
     )
 
-    prix_litre = models.DecimalField(
-        "Prix au litre",
+    prix_litre_override = models.DecimalField(
+        "Prix au litre (override)",
         max_digits=8,
         decimal_places=2,
-        default=Decimal("10.00"),
-        help_text="Unités de monnaie par litre (ex: 4 patates/L → 25cl = 1 patate)",
+        null=True,
+        blank=True,
+        help_text="Laisser vide pour utiliser le prix du fût. Renseigner pour forcer un prix sur cette tireuse (réservé admin).",
     )
+
+    @property
+    def prix_litre(self) -> Decimal:
+        """Prix effectif : override admin si défini, sinon prix du fût, sinon 10.00."""
+        if self.prix_litre_override is not None:
+            return self.prix_litre_override
+        if self.fut_actif and self.fut_actif.prix_litre:
+            return self.fut_actif.prix_litre
+        return Decimal("10.00")
 
     @property
     def reservoir_max_ml(self) -> float:
@@ -257,6 +293,26 @@ class RfidSession(models.Model):
     dernier_volume_ml = models.DecimalField(
         max_digits=10, decimal_places=2, default=Decimal("0.00")
     )
+    is_maintenance = models.BooleanField("Session maintenance", default=False)
+    carte_maintenance = models.ForeignKey(
+        "CarteMaintenance", null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="sessions",
+        verbose_name="Carte maintenance",
+    )
+    produit_maintenance_snapshot = models.CharField(
+        "Produit utilisé", max_length=100, blank=True,
+    )
+
+    balance_avant = models.DecimalField(
+        "Solde avant",
+        max_digits=12, decimal_places=2, null=True, blank=True,
+        help_text="Solde de la carte au début de la session",
+    )
+    balance_apres = models.DecimalField(
+        "Solde après",
+        max_digits=12, decimal_places=2, null=True, blank=True,
+        help_text="Solde de la carte après facturation",
+    )
     last_message = models.TextField(blank=True, default="")
 
     class Meta:
@@ -285,3 +341,27 @@ class RfidSession(models.Model):
     def __str__(self):
         status = "OPEN" if not self.ended_at else "CLOSED"
         return f"{self.tireuse_bec.nom_tireuse}:{self.uid} [{status}] {self.started_at:%Y-%m-%d %H:%M:%S}"
+
+
+class HistoriqueMaintenance(RfidSession):
+    """Vue proxy de RfidSession filtrée sur les sessions maintenance."""
+    class Meta:
+        proxy = True
+        verbose_name = "Historique maintenance"
+        verbose_name_plural = "Historique maintenances"
+
+
+class HistoriqueTireuse(RfidSession):
+    """Vue proxy de RfidSession centrée sur les débits par tireuse."""
+    class Meta:
+        proxy = True
+        verbose_name = "Historique tireuse"
+        verbose_name_plural = "Historique tireuses"
+
+
+class HistoriqueCarte(RfidSession):
+    """Vue proxy de RfidSession centrée sur les mouvements par carte."""
+    class Meta:
+        proxy = True
+        verbose_name = "Historique carte"
+        verbose_name_plural = "Historique cartes"

@@ -1,15 +1,55 @@
-from .models import Card, Debimetre, Fut, HistoriqueFut, RfidSession, TireuseBec
-from .forms import TireuseBecForm
+import csv
+import datetime
+from django.contrib import admin, messages
+from django.contrib.admin import SimpleListFilter
+from django.http import HttpResponse
+from django.utils import timezone
+from django.utils.html import format_html
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
-from django.http import HttpResponse
-from django.contrib import admin, messages
-from django.utils.html import format_html
-import csv
+from unfold.admin import ModelAdmin, TabularInline
+from .models import (Card, CarteMaintenance, Debimetre, Fut, HistoriqueCarte,
+                     HistoriqueFut, HistoriqueMaintenance, HistoriqueTireuse,
+                     RfidSession, TireuseBec)
+from .forms import TireuseBecForm
+
+
+# ---------------------------------------------------------------------------
+# Filtre plage de dates (inputs Du / Au)
+# ---------------------------------------------------------------------------
+class DateRangeFilter(SimpleListFilter):
+    title = "Période"
+    parameter_name = "date_from"
+    template = "admin/date_range_filter.html"
+
+    def expected_parameters(self):
+        return ["date_from", "date_to"]
+
+    def lookups(self, request, model_admin):
+        return (("_", "—"),)  # requis par SimpleListFilter
+
+    def choices(self, changelist):
+        yield {
+            "selected": not (changelist.params.get("date_from") or changelist.params.get("date_to")),
+            "query_string": changelist.get_query_string(remove=["date_from", "date_to"]),
+            "display": "Toutes",
+        }
+
+    def queryset(self, request, queryset):
+        date_from = request.GET.get("date_from")
+        date_to   = request.GET.get("date_to")
+        try:
+            if date_from:
+                queryset = queryset.filter(started_at__date__gte=datetime.date.fromisoformat(date_from))
+            if date_to:
+                queryset = queryset.filter(started_at__date__lte=datetime.date.fromisoformat(date_to))
+        except ValueError:
+            pass
+        return queryset
 
 
 @admin.register(Fut)
-class FutAdmin(admin.ModelAdmin):
+class FutAdmin(ModelAdmin):
     list_display = (
         "nom",
         "brasseur",
@@ -17,14 +57,15 @@ class FutAdmin(admin.ModelAdmin):
         "degre_alcool",
         "volume_fut_l",
         "quantite_stock",
+        "prix_litre",
         "prix_achat",
     )
-    list_editable = ("quantite_stock", "prix_achat")
+    list_editable = ("quantite_stock", "prix_litre", "prix_achat")
     list_filter = ("type_biere", "brasseur")
     search_fields = ("nom", "brasseur")
 
 
-class HistoriqueFutInline(admin.TabularInline):
+class HistoriqueFutInline(TabularInline):
     model = HistoriqueFut
     extra = 0
     readonly_fields = (
@@ -61,7 +102,7 @@ class HistoriqueFutInline(admin.TabularInline):
 
 
 @admin.register(HistoriqueFut)
-class HistoriqueFutAdmin(admin.ModelAdmin):
+class HistoriqueFutAdmin(ModelAdmin):
     list_display = (
         "tireuse_bec",
         "fut",
@@ -101,7 +142,7 @@ class HistoriqueFutAdmin(admin.ModelAdmin):
 
 
 @admin.register(TireuseBec)
-class TireuseBecAdmin(admin.ModelAdmin):
+class TireuseBecAdmin(ModelAdmin):
     inlines = [HistoriqueFutInline]
     form = TireuseBecForm
     actions = ["push_kiosk_url", "push_reload", "push_refresh"]
@@ -111,7 +152,7 @@ class TireuseBecAdmin(admin.ModelAdmin):
         "debimetre",
         "nom_boisson",
         "monnaie",
-        "prix_litre",
+        "prix_effectif_display",
         "col_25cl",
         "col_33cl",
         "col_50cl",
@@ -126,7 +167,6 @@ class TireuseBecAdmin(admin.ModelAdmin):
         "debimetre",
         "nom_boisson",
         "monnaie",
-        "prix_litre",
         "enabled",
     )
     search_fields = ("nom_tireuse", "nom_boisson", "notes")
@@ -144,7 +184,11 @@ class TireuseBecAdmin(admin.ModelAdmin):
         )
 
     def get_readonly_fields(self, request, obj=None):
-        return ("uuid", "col_25cl", "col_33cl", "col_50cl", "volume_restant_cl", "seuil_mini_cl") + super().get_readonly_fields(request, obj)
+        base = ("uuid", "col_25cl", "col_33cl", "col_50cl", "volume_restant_cl", "seuil_mini_cl", "prix_effectif_display")
+        # prix_litre_override réservé aux superusers
+        if not request.user.is_superuser:
+            base += ("prix_litre_override",)
+        return base + super().get_readonly_fields(request, obj)
 
     @admin.display(description="Volume restant (cl)", ordering="reservoir_ml")
     def volume_restant_cl(self, obj):
@@ -154,10 +198,19 @@ class TireuseBecAdmin(admin.ModelAdmin):
     def seuil_mini_cl(self, obj):
         return f"{float(obj.seuil_mini_ml) / 10:.0f} cl"
 
+    @admin.display(description="Prix/Litre")
+    def prix_effectif_display(self, obj):
+        pL = obj.prix_litre  # propriété calculée
+        label = f"{pL} {obj.monnaie}"
+        if obj.prix_litre_override is not None:
+            return format_html('<span title="Override actif">{} ✎</span>', label)
+        return label
+
     def _prix_volume(self, obj, cl):
         from decimal import Decimal
-        if obj.prix_litre and obj.prix_litre > 0:
-            val = (obj.prix_litre * Decimal(str(cl)) / 100).quantize(Decimal("0.01"))
+        pL = obj.prix_litre  # propriété calculée
+        if pL and pL > 0:
+            val = (pL * Decimal(str(cl)) / 100).quantize(Decimal("0.01"))
             return f"{val} {obj.monnaie}"
         return "—"
 
@@ -250,83 +303,260 @@ class TireuseBecAdmin(admin.ModelAdmin):
 
 
 @admin.register(Debimetre)
-class DebitmetreAdmin(admin.ModelAdmin):
+class DebitmetreAdmin(ModelAdmin):
     list_display = ("name", "flow_calibration_factor")
     list_editable = ("flow_calibration_factor",)
 
 
 @admin.register(Card)
-class CardAdmin(admin.ModelAdmin):
-    list_display = ("uid", "label", "balance", "is_active", "valid_from", "valid_to")
+class CardAdmin(ModelAdmin):
+    list_display = ("label", "uid", "solde_colore", "is_active", "valid_from", "valid_to")
+    list_editable = ("is_active",)
     search_fields = ("uid", "label")
     list_filter = ("is_active",)
+    ordering = ("-balance",)
 
-
-def export_sessions_csv(modeladmin, request, queryset):
-    resp = HttpResponse(content_type="text/csv")
-    resp["Content-Disposition"] = 'attachment; filename="rfid_sessions.csv"'
-    w = csv.writer(resp)
-    w.writerow(
-        [
-            "id",
-            "uid",
-            "tireuse_bec",
-            "liquid",
-            "label_snapshot",
-            "authorized",
-            "started_at",
-            "ended_at",
-            "duration_s",
-            "volume_start_cl",
-            "volume_end_cl",
-            "volume_servi_cl",
-        ]
-    )
-    for s in queryset:
-        w.writerow(
-            [
-                s.id,
-                s.uid,
-                s.tireuse_bec.nom_tireuse,
-                s.liquid_label_snapshot,
-                s.label_snapshot,
-                s.authorized,
-                s.started_at,
-                s.ended_at,
-                (s.duration_seconds or ""),
-                f"{s.volume_start_ml / 10:.1f}",
-                f"{s.volume_end_ml / 10:.1f}",
-                f"{s.volume_delta_ml / 10:.1f}",
-            ]
+    @admin.display(description="Solde", ordering="balance")
+    def solde_colore(self, obj):
+        if obj.balance <= 0:
+            color = "#e74c3c"
+        elif obj.balance < 5:
+            color = "#f39c12"
+        else:
+            color = "#27ae60"
+        return format_html(
+            '<b style="color:{}">{} {}</b>',
+            color, obj.balance, "€",
         )
-    return resp
 
+    actions = ["afficher_total", "export_cartes_csv"]
 
-export_sessions_csv.short_description = "Exporter en CSV"
+    @admin.action(description="Afficher le solde total de la sélection")
+    def afficher_total(self, request, queryset):
+        from django.db.models import Sum
+        total = queryset.aggregate(t=Sum("balance"))["t"] or 0
+        nb = queryset.count()
+        self.message_user(
+            request,
+            f"Solde total ({nb} carte(s) sélectionnée(s)) : {total:.2f} €",
+            messages.INFO,
+        )
+
+    @admin.action(description="Exporter en CSV")
+    def export_cartes_csv(self, request, queryset):
+        from django.db.models import Sum
+        resp = HttpResponse(content_type="text/csv; charset=utf-8-sig")
+        resp["Content-Disposition"] = 'attachment; filename="cartes_soldes.csv"'
+        w = csv.writer(resp, delimiter=";")
+        w.writerow(["UID", "Nom carte", "Solde (€)", "Active", "Valide depuis", "Fin validité"])
+        for c in queryset.order_by("-balance"):
+            w.writerow([
+                c.uid, c.label, f"{c.balance:.2f}",
+                "Oui" if c.is_active else "Non",
+                c.valid_from.strftime("%Y-%m-%d") if c.valid_from else "",
+                c.valid_to.strftime("%Y-%m-%d") if c.valid_to else "",
+            ])
+        total = queryset.aggregate(t=Sum("balance"))["t"] or 0
+        w.writerow([])
+        w.writerow(["TOTAL", "", f"{total:.2f}", "", "", ""])
+        return resp
 
 
 @admin.register(RfidSession)
-class RfidSessionAdmin(admin.ModelAdmin):
-    list_display = (
-        "tireuse_bec",
-        "liquid_label_snapshot",
-        "uid",
-        "authorized",
-        "started_at",
-        "ended_at",
-        "volume_servi_cl",
-        "label_snapshot",
-    )
+class RfidSessionAdmin(ModelAdmin):
+    list_display = ("tireuse_bec", "liquid_label_snapshot", "uid", "authorized",
+                    "started_at", "ended_at", "volume_servi_cl", "label_snapshot")
+    list_filter = ("authorized", "tireuse_bec")
+    search_fields = ("uid", "label_snapshot", "liquid_label_snapshot")
+    date_hierarchy = "started_at"
 
     @admin.display(description="Volume servi (cl)", ordering="volume_delta_ml")
     def volume_servi_cl(self, obj):
         return f"{obj.volume_delta_ml / 10:.1f}"
-    list_filter = ("authorized", "tireuse_bec")
-    search_fields = (
-        "uid",
-        "label_snapshot",
-        "tireuse_bec__name",
-        "liquid_label_snapshot",
-    )
+
+
+# ---------------------------------------------------------------------------
+# Historique tireuses
+# ---------------------------------------------------------------------------
+def _export_tireuses_csv(modeladmin, request, queryset):
+    resp = HttpResponse(content_type="text/csv; charset=utf-8-sig")
+    resp["Content-Disposition"] = 'attachment; filename="historique_tireuses.csv"'
+    w = csv.writer(resp, delimiter=";")
+    w.writerow(["Date", "Tireuse", "Boisson", "UID carte", "Nom carte",
+                "Volume servi (cl)", "Unités débitées", "Durée (s)", "Autorisé"])
+    total_vol = 0
+    total_units = 0
+    for s in queryset.order_by("started_at"):
+        vol_cl = float(s.volume_delta_ml / 10)
+        total_vol += vol_cl
+        total_units += float(s.charged_units or 0)
+        w.writerow([
+            s.started_at.strftime("%Y-%m-%d %H:%M"),
+            s.tireuse_bec.nom_tireuse if s.tireuse_bec else "",
+            s.liquid_label_snapshot,
+            s.uid,
+            s.label_snapshot,
+            f"{vol_cl:.1f}",
+            f"{float(s.charged_units or 0):.2f}",
+            s.duration_seconds or "",
+            "Oui" if s.authorized else "Non",
+        ])
+    w.writerow([])
+    w.writerow(["TOTAL", "", "", "", "", f"{total_vol:.1f}", f"{total_units:.2f}", "", ""])
+    return resp
+
+_export_tireuses_csv.short_description = "Exporter en CSV"
+
+
+@admin.register(HistoriqueTireuse)
+class HistoriqueTireuseAdmin(ModelAdmin):
+    list_display = ("started_at", "tireuse_bec", "liquid_label_snapshot",
+                    "uid", "label_snapshot", "volume_servi_cl",
+                    "montant", "duree_s")
+    list_filter = (DateRangeFilter, "tireuse_bec")
+    search_fields = ("uid", "label_snapshot", "liquid_label_snapshot")
     date_hierarchy = "started_at"
-    actions = [export_sessions_csv]
+    actions = [_export_tireuses_csv]
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    @admin.display(description="Volume (cl)", ordering="volume_delta_ml")
+    def volume_servi_cl(self, obj):
+        return f"{obj.volume_delta_ml / 10:.1f}"
+
+    @admin.display(description="Montant", ordering="charged_units")
+    def montant(self, obj):
+        if obj.charged_units:
+            return f"{obj.charged_units:.2f} {obj.unit_label_snapshot}"
+        return "—"
+
+    @admin.display(description="Durée (s)", ordering="ended_at")
+    def duree_s(self, obj):
+        d = obj.duration_seconds
+        return int(d) if d is not None else "—"
+
+
+# ---------------------------------------------------------------------------
+# Historique cartes
+# ---------------------------------------------------------------------------
+def _export_cartes_csv(modeladmin, request, queryset):
+    resp = HttpResponse(content_type="text/csv; charset=utf-8-sig")
+    resp["Content-Disposition"] = 'attachment; filename="historique_cartes.csv"'
+    w = csv.writer(resp, delimiter=";")
+    w.writerow(["Date", "UID", "Nom carte", "Tireuse", "Boisson",
+                "Volume servi (cl)", "Unités débitées",
+                "Solde avant", "Solde après", "Durée (s)"])
+    for s in queryset.order_by("started_at"):
+        w.writerow([
+            s.started_at.strftime("%Y-%m-%d %H:%M"),
+            s.uid,
+            s.label_snapshot,
+            s.tireuse_bec.nom_tireuse if s.tireuse_bec else "",
+            s.liquid_label_snapshot,
+            f"{float(s.volume_delta_ml / 10):.1f}",
+            f"{float(s.charged_units or 0):.2f}",
+            f"{s.balance_avant:.2f}" if s.balance_avant is not None else "",
+            f"{s.balance_apres:.2f}" if s.balance_apres is not None else "",
+            s.duration_seconds or "",
+        ])
+    return resp
+
+_export_cartes_csv.short_description = "Exporter en CSV"
+
+
+@admin.register(HistoriqueCarte)
+class HistoriqueCarteAdmin(ModelAdmin):
+    list_display = ("started_at", "label_snapshot", "uid", "tireuse_bec",
+                    "liquid_label_snapshot", "volume_servi_cl",
+                    "montant", "balance_avant", "balance_apres")
+    list_filter = (DateRangeFilter, "tireuse_bec")
+    search_fields = ("uid", "label_snapshot")
+    date_hierarchy = "started_at"
+    actions = [_export_cartes_csv]
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    @admin.display(description="Volume (cl)", ordering="volume_delta_ml")
+    def volume_servi_cl(self, obj):
+        return f"{obj.volume_delta_ml / 10:.1f}"
+
+    @admin.display(description="Montant", ordering="charged_units")
+    def montant(self, obj):
+        if obj.charged_units:
+            return f"{obj.charged_units:.2f} {obj.unit_label_snapshot}"
+        return "—"
+
+
+# ---------------------------------------------------------------------------
+# Cartes maintenance
+# ---------------------------------------------------------------------------
+@admin.register(CarteMaintenance)
+class CarteMaintenanceAdmin(ModelAdmin):
+    list_display = ("label", "uid", "is_active", "produit", "notes")
+    list_editable = ("is_active",)
+    search_fields = ("uid", "label", "produit")
+    list_filter = ("is_active",)
+
+
+# ---------------------------------------------------------------------------
+# Historique maintenance
+# ---------------------------------------------------------------------------
+def _export_maintenance_csv(modeladmin, request, queryset):
+    resp = HttpResponse(content_type="text/csv; charset=utf-8-sig")
+    resp["Content-Disposition"] = 'attachment; filename="historique_maintenance.csv"'
+    w = csv.writer(resp, delimiter=";")
+    w.writerow(["Date", "Tireuse", "UID carte", "Carte maintenance", "Produit", "Volume (cl)", "Durée (s)"])
+    total_vol = 0
+    for s in queryset.order_by("started_at"):
+        vol_cl = float(s.volume_delta_ml / 10)
+        total_vol += vol_cl
+        w.writerow([
+            s.started_at.strftime("%Y-%m-%d %H:%M"),
+            s.tireuse_bec.nom_tireuse if s.tireuse_bec else "",
+            s.uid,
+            str(s.carte_maintenance) if s.carte_maintenance else "",
+            s.produit_maintenance_snapshot,
+            f"{vol_cl:.1f}",
+            s.duration_seconds or "",
+        ])
+    w.writerow([])
+    w.writerow(["TOTAL", "", "", "", "", f"{total_vol:.1f}", ""])
+    return resp
+
+_export_maintenance_csv.short_description = "Exporter en CSV"
+
+
+@admin.register(HistoriqueMaintenance)
+class HistoriqueMaintenanceAdmin(ModelAdmin):
+    list_display = ("started_at", "tireuse_bec", "uid", "carte_maintenance",
+                    "produit_maintenance_snapshot", "volume_servi_cl", "duree_s")
+    list_filter = (DateRangeFilter, "tireuse_bec")
+    search_fields = ("uid", "produit_maintenance_snapshot")
+    date_hierarchy = "started_at"
+    actions = [_export_maintenance_csv]
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).filter(is_maintenance=True)
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    @admin.display(description="Volume (cl)", ordering="volume_delta_ml")
+    def volume_servi_cl(self, obj):
+        return f"{obj.volume_delta_ml / 10:.1f}"
+
+    @admin.display(description="Durée (s)", ordering="ended_at")
+    def duree_s(self, obj):
+        d = obj.duration_seconds
+        return int(d) if d is not None else "—"

@@ -6,7 +6,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.conf import settings
 from django.utils import timezone
 from asgiref.sync import async_to_sync
-from .models import Card, RfidSession, TireuseBec
+from .models import Card, CarteMaintenance, RfidSession, TireuseBec
 from decimal import Decimal, ROUND_HALF_UP
 from django.db import transaction
 from django.db.models import F
@@ -145,12 +145,49 @@ def api_rfid_authorize(request):
 
     # --- CAS MAINTENANCE : tireuse hors service ---
     if not tireuse_bec.enabled:
-        # On cherche la carte (peu importe si active ou non) pour afficher le solde
+        # Carte maintenance → ouvrir la vanne, session sans facturation
+        maint_card = CarteMaintenance.objects.filter(uid__iexact=uid, is_active=True).first()
+        if maint_card:
+            produit = maint_card.produit or "Nettoyage"
+            open_session = RfidSession.objects.create(
+                tireuse_bec=tireuse_bec,
+                uid=uid,
+                authorized=True,
+                is_maintenance=True,
+                carte_maintenance=maint_card,
+                produit_maintenance_snapshot=maint_card.produit,
+                label_snapshot=maint_card.label,
+                liquid_label_snapshot=produit,
+                unit_ml_snapshot=Decimal("0.00"),
+            )
+            flow_factor = (
+                tireuse_bec.debimetre.flow_calibration_factor
+                if tireuse_bec.debimetre else 6.5
+            )
+            _ws_push(tireuse_bec, {
+                "tireuse_bec": tireuse_bec.nom_tireuse,
+                "tireuse_bec_uuid": str(tireuse_bec.uuid),
+                "maintenance": True,
+                "present": True,
+                "authorized": True,
+                "vanne_ouverte": True,
+                "uid": uid,
+                "volume_ml": 0.0,
+                "message": f"Nettoyage — {produit}",
+            })
+            return JsonResponse({
+                "authorized": True,
+                "session_id": open_session.id,
+                "maintenance": True,
+                "liquid_label": produit,
+                "unit_ml": "0",
+                "unit_label": "",
+                "flow_calibration_factor": flow_factor,
+            })
+
+        # Carte normale sur tireuse en maintenance → refus avec solde affiché
         any_card = Card.objects.filter(uid__iexact=uid).first()
-        if any_card:
-            balance_display = str(any_card.balance)
-        else:
-            balance_display = "—"
+        balance_display = str(any_card.balance) if any_card else "—"
         _ws_push(tireuse_bec, {
             "tireuse_bec": tireuse_bec.nom_tireuse,
             "tireuse_bec_uuid": str(tireuse_bec.uuid),
@@ -465,33 +502,26 @@ def api_rfid_event(request):
     elif event_type in ["pour_update", "pour_end"]:
         with transaction.atomic():
             # 1. Calculer combien on a versé DEPUIS LA DERNIERE FOIS pour le Stock
-            # On utilise volume_delta_ml comme "dernier volume connu"
             val_prev = session.volume_delta_ml
-            if val_prev is None:
-                previous_vol = Decimal("0.00")
-            else:
-                # On passe par str() pour convertir float -> Decimal sans erreur
-                previous_vol = Decimal(str(val_prev))
-
+            previous_vol = Decimal(str(val_prev)) if val_prev is not None else Decimal("0.00")
             delta_stock = current_vol - previous_vol
 
-            # Mise à jour Stock Tireuse (si positif)
-            if delta_stock > 0:
+            # Mise à jour Stock Tireuse (liquide vendu uniquement, pas maintenance)
+            if delta_stock > 0 and not session.is_maintenance:
                 tb = TireuseBec.objects.select_for_update().get(pk=tireuse_bec.pk)
                 tb.reservoir_ml = tb.reservoir_ml - delta_stock
                 if tb.reservoir_ml < 0:
                     tb.reservoir_ml = Decimal("0.00")
                 tb.save()
-                # On met à jour l'objet local pour le renvoyer au WS
                 tireuse_bec.reservoir_ml = tb.reservoir_ml
 
             # 2. Mise à jour Session
-            session.volume_delta_ml = current_vol  # Le volume accumulé venant du Pi
+            session.volume_delta_ml = current_vol
             session.last_message = f"Volume: {current_vol} ml"
 
-            # Vérification solde épuisé pendant le service
+            # Vérification solde épuisé (jamais pour maintenance)
             solde_epuise = False
-            if session.card and session.allowed_ml_session:
+            if not session.is_maintenance and session.card and session.allowed_ml_session:
                 if current_vol >= float(session.allowed_ml_session):
                     solde_epuise = True
                     session.last_message = "Solde épuisé - Vanne fermée"
@@ -524,27 +554,29 @@ def api_rfid_event(request):
                 session.ended_at = timezone.now()
                 session_done = True
 
-                if session.card:
+                if session.is_maintenance:
+                    # Nettoyage : aucune facturation, juste enregistrer le volume
+                    produit = session.produit_maintenance_snapshot or "Nettoyage"
+                    session.last_message = f"Nettoyage terminé — {current_vol:.0f} ml ({produit})"
+                elif session.card:
                     card = Card.objects.select_for_update().get(pk=session.card.pk)
                     unit_ml = session.unit_ml_snapshot or Decimal("100.0")
 
+                    session.balance_avant = card.balance
+
                     if current_vol > 0 and unit_ml > 0:
-                        # Calcul prix
                         units = (current_vol / unit_ml).quantize(
                             Decimal("0.01"), rounding=ROUND_HALF_UP
                         )
-
-                        # Plafond solde
                         if units > card.balance:
                             units = card.balance
-
-                            # Débit
                         card.balance -= units
                         card.save()
-
                         session.charged_units = units
                         charged_display = str(units)
                         balance_display = str(card.balance)
+
+                    session.balance_apres = card.balance
 
             session.save()
 
@@ -562,28 +594,42 @@ def api_rfid_event(request):
                 vanne_ouverte = False
                 force_close = True
 
-            data_to_send = {
-                "tireuse_bec": tireuse_bec.nom_tireuse,
-                "tireuse_bec_uuid": str(tireuse_bec.uuid),
-                "present": True if not session_done else False,
-                "authorized": True,
-                "vanne_ouverte": vanne_ouverte,
-                "force_close": force_close,
-                "session_done": session_done or solde_epuise,
-                "uid": uid,
-                "liquid_label": session.liquid_label_snapshot or "Bière",
-                "volume_ml": float(current_vol),
-                "debit_cl_min": debit_cl_min,
-                "charged": charged_display,
-                "balance": balance_display,
-                "reservoir_ml": float(tireuse_bec.reservoir_ml),
-                "reservoir_max_ml": tireuse_bec.reservoir_max_ml,
-                "prix_litre": str(tireuse_bec.prix_litre),
-                "monnaie": tireuse_bec.monnaie,
-                "message": f"Terminé : {current_vol:.0f} ml"
-                if session_done
-                else ("Solde épuisé !" if solde_epuise else "Service en cours..."),
-            }
+            if session.is_maintenance:
+                data_to_send = {
+                    "tireuse_bec": tireuse_bec.nom_tireuse,
+                    "tireuse_bec_uuid": str(tireuse_bec.uuid),
+                    "maintenance": True,
+                    "present": not session_done,
+                    "authorized": True,
+                    "vanne_ouverte": vanne_ouverte,
+                    "session_done": session_done,
+                    "uid": uid,
+                    "volume_ml": float(current_vol),
+                    "message": session.last_message,
+                }
+            else:
+                data_to_send = {
+                    "tireuse_bec": tireuse_bec.nom_tireuse,
+                    "tireuse_bec_uuid": str(tireuse_bec.uuid),
+                    "present": True if not session_done else False,
+                    "authorized": True,
+                    "vanne_ouverte": vanne_ouverte,
+                    "force_close": force_close,
+                    "session_done": session_done or solde_epuise,
+                    "uid": uid,
+                    "liquid_label": session.liquid_label_snapshot or "Bière",
+                    "volume_ml": float(current_vol),
+                    "debit_cl_min": debit_cl_min,
+                    "charged": charged_display,
+                    "balance": balance_display,
+                    "reservoir_ml": float(tireuse_bec.reservoir_ml),
+                    "reservoir_max_ml": tireuse_bec.reservoir_max_ml,
+                    "prix_litre": str(tireuse_bec.prix_litre),
+                    "monnaie": tireuse_bec.monnaie,
+                    "message": f"Terminé : {current_vol:.0f} ml"
+                    if session_done
+                    else ("Solde épuisé !" if solde_epuise else "Service en cours..."),
+                }
 
             # 4. On envoie.
             # - "type" doit correspondre au nom de la méthode dans Consumer (`async def state_update`)

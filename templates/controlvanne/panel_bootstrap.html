@@ -214,6 +214,7 @@
       p50:         document.getElementById('p50-'    + uuid),
       lastBalance: null,
       wasPresent: false,
+      isMaintenance: false,
     };
     // Init prix et jauge depuis template
     if (prixBlock) {
@@ -245,17 +246,25 @@
     popupTimeout = setTimeout(() => { popup.style.display = 'none'; }, 5000);
   }
 
-  // Remise à zéro de la carte (mode attente)
+  // Remise à zéro de la carte (mode attente ou maintenance selon état)
   function resetCardUI(c) {
     if (!c) return;
     c.uid.innerHTML = '&mdash;';
-    c.auth.className = 'badge bg-secondary';
-    c.auth.textContent = 'En attente';
-    c.state.className = 'badge bg-danger';
-    c.state.textContent = 'Fermée';
     c.vol.textContent = '0 cl';
-    c.msg.textContent = 'Posez votre badge...';
     c.balance.textContent = '—';
+    if (c.isMaintenance) {
+      c.auth.className = 'badge bg-warning text-dark';
+      c.auth.textContent = 'Hors service';
+      c.state.className = 'badge bg-warning text-dark';
+      c.state.textContent = 'Maintenance';
+      c.msg.textContent = 'En Maintenance';
+    } else {
+      c.auth.className = 'badge bg-secondary';
+      c.auth.textContent = 'En attente';
+      c.state.className = 'badge bg-danger';
+      c.state.textContent = 'Fermée';
+      c.msg.textContent = 'Posez votre badge...';
+    }
   }
 
   function setBadge(el, ok) {
@@ -283,15 +292,34 @@
       if (payload.maintenance) {
         const uuid = payload.tireuse_bec_uuid || '';
         const c = cards[uuid] || Object.values(cards)[0];
-        if (c) {
-          c.state.className = 'badge bg-warning text-dark';
-          c.state.textContent = 'Maintenance';
+        if (!c) return;
+        c.isMaintenance = true;
+        c.state.className = 'badge bg-warning text-dark';
+        c.state.textContent = 'Maintenance';
+        c.uid.textContent = payload.uid || '—';
+
+        if (payload.present && payload.authorized) {
+          // Session maintenance active (carte rinçage autorisée, liquide en cours)
+          c.auth.className = 'badge bg-warning text-dark';
+          c.auth.textContent = 'Rinçage';
+          c.vol.textContent = Math.round((payload.volume_ml || 0) / 10) + ' cl';
+          c.balance.textContent = '—';
+          if (payload.message) c.msg.textContent = payload.message;
+        } else if (payload.session_done) {
+          // Fin de session maintenance
+          c.auth.className = 'badge bg-info text-dark';
+          c.auth.textContent = 'Fin rinçage';
+          c.vol.textContent = Math.round((payload.volume_ml || 0) / 10) + ' cl';
+          if (payload.message) c.msg.textContent = payload.message;
+          setTimeout(() => resetCardUI(c), 5000);
+        } else {
+          // Tireuse en maintenance — carte normale refusée ou état repos
           c.auth.className = 'badge bg-warning text-dark';
           c.auth.textContent = 'Hors service';
-          c.msg.textContent = 'En Maintenance';
-          c.uid.textContent = payload.uid || '—';
           c.vol.textContent = '0 cl';
-          c.balance.textContent = (payload.balance !== undefined) ? payload.balance : '—';
+          const bal = payload.balance;
+          c.balance.textContent = (bal !== undefined && bal !== null && bal !== '—' && parseFloat(bal) > 0) ? bal : '—';
+          c.msg.textContent = payload.message || 'En Maintenance';
         }
         return;
       }

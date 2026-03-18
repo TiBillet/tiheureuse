@@ -22,6 +22,7 @@ ALLOWED_HOSTS = [h.strip() for h in _hosts.split(",") if h.strip()] or ["*"]
 # Application definition
 
 INSTALLED_APPS = [
+    'unfold',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -114,3 +115,95 @@ else:
     STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+# ---------------------------------------------------------------------------
+# Django Unfold — interface admin moderne
+# ---------------------------------------------------------------------------
+from django.urls import reverse_lazy
+
+UNFOLD = {
+    "SITE_TITLE": "TiHeure",
+    "SITE_HEADER": "TiHeure",
+    "SITE_URL": "/",
+    "SHOW_HISTORY": True,
+    "SHOW_VIEW_ON_SITE": False,
+    "SIDEBAR": {
+        "show_search": False,
+        "navigation": [
+            {
+                "title": "Exploitation",
+                "collapsible": True,
+                "items": [
+                    {
+                        "title": "Tireuses",
+                        "icon": "sports_bar",
+                        "link": reverse_lazy("admin:controlvanne_tireusebec_changelist"),
+                    },
+                    {
+                        "title": "Fûts",
+                        "icon": "inventory_2",
+                        "link": reverse_lazy("admin:controlvanne_fut_changelist"),
+                    },
+                ],
+            },
+            {
+                "title": "Cartes",
+                "collapsible": True,
+                "items": [
+                    {
+                        "title": "Cartes clients",
+                        "icon": "credit_card",
+                        "link": reverse_lazy("admin:controlvanne_card_changelist"),
+                    },
+                    {
+                        "title": "Cartes maintenance",
+                        "icon": "build",
+                        "link": reverse_lazy("admin:controlvanne_cartemaintenance_changelist"),
+                    },
+                ],
+            },
+            {
+                "title": "Historiques",
+                "collapsible": True,
+                "items": [
+                    {
+                        "title": "Par tireuse",
+                        "icon": "bar_chart",
+                        "link": reverse_lazy("admin:controlvanne_historiquetireuse_changelist"),
+                    },
+                    {
+                        "title": "Par carte",
+                        "icon": "receipt_long",
+                        "link": reverse_lazy("admin:controlvanne_historiquecarte_changelist"),
+                    },
+                    {
+                        "title": "Rotations fûts",
+                        "icon": "swap_horiz",
+                        "link": reverse_lazy("admin:controlvanne_historiquefut_changelist"),
+                    },
+                    {
+                        "title": "Maintenance",
+                        "icon": "cleaning_services",
+                        "link": reverse_lazy("admin:controlvanne_historiquemaintenance_changelist"),
+                    },
+                ],
+            },
+            {
+                "title": "Configuration",
+                "collapsible": True,
+                "items": [
+                    {
+                        "title": "Débitmètres",
+                        "icon": "tune",
+                        "link": reverse_lazy("admin:controlvanne_debimetre_changelist"),
+                    },
+                    {
+                        "title": "Sessions brutes",
+                        "icon": "developer_mode",
+                        "link": reverse_lazy("admin:controlvanne_rfidsession_changelist"),
+                    },
+                ],
+            },
+        ],
+    },
+}
