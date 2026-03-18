@@ -1,4 +1,4 @@
-from .models import Card, Debimetre, RfidSession, TireuseBec
+from .models import Card, Debimetre, Fut, HistoriqueFut, RfidSession, TireuseBec
 from .forms import TireuseBecForm
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
@@ -8,12 +8,106 @@ from django.utils.html import format_html
 import csv
 
 
+@admin.register(Fut)
+class FutAdmin(admin.ModelAdmin):
+    list_display = (
+        "nom",
+        "brasseur",
+        "type_biere",
+        "degre_alcool",
+        "volume_fut_l",
+        "quantite_stock",
+        "prix_achat",
+    )
+    list_editable = ("quantite_stock", "prix_achat")
+    list_filter = ("type_biere", "brasseur")
+    search_fields = ("nom", "brasseur")
+
+
+class HistoriqueFutInline(admin.TabularInline):
+    model = HistoriqueFut
+    extra = 0
+    readonly_fields = (
+        "fut",
+        "mis_en_service_le",
+        "retire_le",
+        "volume_initial_l",
+        "volume_final_l",
+        "volume_consomme",
+    )
+    fields = readonly_fields
+    ordering = ("-mis_en_service_le",)
+    can_delete = False
+
+    def has_add_permission(self, request, obj=None):
+        return False
+
+    @admin.display(description="Volume initial (L)")
+    def volume_initial_l(self, obj):
+        return f"{float(obj.volume_initial_ml) / 1000:.1f} L"
+
+    @admin.display(description="Volume final (L)")
+    def volume_final_l(self, obj):
+        if obj.volume_final_ml is not None:
+            return f"{float(obj.volume_final_ml) / 1000:.1f} L"
+        return "En service"
+
+    @admin.display(description="Consommé (L)")
+    def volume_consomme(self, obj):
+        v = obj.volume_consomme_l
+        if v is not None:
+            return f"{v:.1f} L"
+        return "—"
+
+
+@admin.register(HistoriqueFut)
+class HistoriqueFutAdmin(admin.ModelAdmin):
+    list_display = (
+        "tireuse_bec",
+        "fut",
+        "mis_en_service_le",
+        "retire_le",
+        "volume_initial_l",
+        "volume_final_l",
+        "volume_consomme",
+    )
+    list_filter = ("tireuse_bec", "fut__type_biere")
+    date_hierarchy = "mis_en_service_le"
+    readonly_fields = (
+        "tireuse_bec",
+        "fut",
+        "mis_en_service_le",
+        "retire_le",
+        "volume_initial_ml",
+        "volume_final_ml",
+    )
+
+    @admin.display(description="Volume initial (L)")
+    def volume_initial_l(self, obj):
+        return f"{float(obj.volume_initial_ml) / 1000:.1f} L"
+
+    @admin.display(description="Volume final (L)")
+    def volume_final_l(self, obj):
+        if obj.volume_final_ml is not None:
+            return f"{float(obj.volume_final_ml) / 1000:.1f} L"
+        return "En service"
+
+    @admin.display(description="Consommé (L)")
+    def volume_consomme(self, obj):
+        v = obj.volume_consomme_l
+        if v is not None:
+            return f"{v:.1f} L"
+        return "—"
+
+
 @admin.register(TireuseBec)
 class TireuseBecAdmin(admin.ModelAdmin):
+    inlines = [HistoriqueFutInline]
     form = TireuseBecForm
     actions = ["push_kiosk_url", "push_reload", "push_refresh"]
     list_display = (
         "name_with_uuid",
+        "fut_actif",
         "debimetre",
         "nom_boisson",
         "monnaie",
@@ -21,13 +115,14 @@ class TireuseBecAdmin(admin.ModelAdmin):
         "col_25cl",
         "col_33cl",
         "col_50cl",
-        "reservoir_ml",
-        "seuil_mini_ml",
+        "volume_restant_cl",
+        "seuil_mini_cl",
         "appliquer_reserve",
         "enabled",
         "notes",
     )
     list_editable = (
+        "fut_actif",
         "debimetre",
         "nom_boisson",
         "monnaie",
@@ -49,7 +144,15 @@ class TireuseBecAdmin(admin.ModelAdmin):
         )
 
     def get_readonly_fields(self, request, obj=None):
-        return ("uuid", "col_25cl", "col_33cl", "col_50cl") + super().get_readonly_fields(request, obj)
+        return ("uuid", "col_25cl", "col_33cl", "col_50cl", "volume_restant_cl", "seuil_mini_cl") + super().get_readonly_fields(request, obj)
+
+    @admin.display(description="Volume restant (cl)", ordering="reservoir_ml")
+    def volume_restant_cl(self, obj):
+        return f"{float(obj.reservoir_ml) / 10:.0f} cl"
+
+    @admin.display(description="Seuil mini (cl)", ordering="seuil_mini_ml")
+    def seuil_mini_cl(self, obj):
+        return f"{float(obj.seuil_mini_ml) / 10:.0f} cl"
 
     def _prix_volume(self, obj, cl):
         from decimal import Decimal

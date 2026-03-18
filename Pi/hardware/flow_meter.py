@@ -95,7 +95,12 @@ class FlowMeter:
         return self.volume_total_ml
 
     def get_flow_rate(self):
+        """Retourne le débit en L/min (usage interne)."""
         return self.current_flow_rate
+
+    def get_flow_rate_cl(self):
+        """Retourne le débit en cl/min."""
+        return self.current_flow_rate * 100
 
     def set_calibration_factor(self, factor: float):
         """Met à jour le facteur de calibration reçu depuis le backend Django."""

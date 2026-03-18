@@ -54,6 +54,48 @@ class Debimetre(models.Model):
         return f"{self.name} (factor={self.flow_calibration_factor})"
 
 
+class Fut(models.Model):
+    TYPE_CHOICES = [
+        ("blonde", "Blonde"),
+        ("brune", "Brune"),
+        ("ambree", "Ambrée"),
+        ("blanche", "Blanche"),
+        ("ipa", "IPA"),
+        ("stout", "Stout"),
+        ("lager", "Lager"),
+        ("autre", "Autre"),
+    ]
+
+    nom = models.CharField("Nom de la bière", max_length=100)
+    brasseur = models.CharField("Brasseur", max_length=100, blank=True)
+    type_biere = models.CharField(
+        "Type", max_length=20, choices=TYPE_CHOICES, default="blonde"
+    )
+    degre_alcool = models.DecimalField(
+        "Degré d'alcool (%)", max_digits=4, decimal_places=1, default=Decimal("0.0")
+    )
+    volume_fut_l = models.DecimalField(
+        "Volume du fût (L)", max_digits=6, decimal_places=1, default=Decimal("30.0")
+    )
+    quantite_stock = models.PositiveIntegerField("Quantité en stock", default=0)
+    prix_achat = models.DecimalField(
+        "Prix d'achat (€)",
+        max_digits=8,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Prix d'achat du fût (facultatif)",
+    )
+
+    class Meta:
+        verbose_name = "Fût"
+        verbose_name_plural = "Fûts"
+        ordering = ["nom"]
+
+    def __str__(self):
+        return f"{self.nom} — {self.brasseur} ({self.volume_fut_l}L)"
+
+
 class TireuseBec(models.Model):
     uuid = models.UUIDField(default=uuid4, primary_key=True, editable=False)
 
@@ -81,11 +123,27 @@ class TireuseBec(models.Model):
     )
 
     @property
+    def reservoir_max_ml(self) -> float:
+        """Volume de référence (fût plein) en ml, pour calcul du % jauge."""
+        if self.fut_actif and self.fut_actif.volume_fut_l:
+            return float(self.fut_actif.volume_fut_l) * 1000
+        return float(self.reservoir_ml) if self.reservoir_ml else 1.0
+
+    @property
     def unit_ml(self) -> Decimal:
         """ml par unité de monnaie — calculé depuis prix_litre. Utilisé par le Pi."""
         if self.prix_litre and self.prix_litre > 0:
             return (Decimal("1000") / self.prix_litre).quantize(Decimal("0.01"))
         return Decimal("100.00")
+
+    fut_actif = models.ForeignKey(
+        "Fut",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="tireuses_actives",
+        verbose_name="Fût en service",
+    )
 
     debimetre = models.ForeignKey(
         "Debimetre",
@@ -98,6 +156,7 @@ class TireuseBec(models.Model):
 
     # TODO: Passer en entier avec modulo si besoin ?
     reservoir_ml = models.DecimalField(
+        "Volume restant",
         max_digits=10,
         decimal_places=2,
         default=Decimal("0.00"),
@@ -119,6 +178,43 @@ class TireuseBec(models.Model):
 
     def __str__(self):
         return self.nom_tireuse
+
+
+class HistoriqueFut(models.Model):
+    tireuse_bec = models.ForeignKey(
+        TireuseBec,
+        on_delete=models.CASCADE,
+        related_name="historique_futs",
+        verbose_name="Tireuse",
+    )
+    fut = models.ForeignKey(
+        Fut,
+        on_delete=models.CASCADE,
+        related_name="historique",
+        verbose_name="Fût",
+    )
+    mis_en_service_le = models.DateTimeField("Mis en service le", default=timezone.now)
+    retire_le = models.DateTimeField("Retiré le", null=True, blank=True)
+    volume_initial_ml = models.DecimalField(
+        "Volume initial (ml)", max_digits=10, decimal_places=2, default=Decimal("0.00")
+    )
+    volume_final_ml = models.DecimalField(
+        "Volume final (ml)", max_digits=10, decimal_places=2, null=True, blank=True
+    )
+
+    class Meta:
+        verbose_name = "Historique fût"
+        verbose_name_plural = "Historique fûts"
+        ordering = ["-mis_en_service_le"]
+
+    @property
+    def volume_consomme_l(self):
+        if self.volume_final_ml is not None:
+            return float((self.volume_initial_ml - self.volume_final_ml) / 1000)
+        return None
+
+    def __str__(self):
+        return f"{self.tireuse_bec} ← {self.fut} ({self.mis_en_service_le:%Y-%m-%d})"
 
 
 class RfidSession(models.Model):

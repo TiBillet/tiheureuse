@@ -260,6 +260,10 @@ def api_rfid_authorize(request):
         "uid": uid,
         "liquid_label": tireuse_bec.nom_boisson,
         "balance": str(card.balance),
+        "reservoir_ml": float(tireuse_bec.reservoir_ml),
+        "reservoir_max_ml": tireuse_bec.reservoir_max_ml,
+        "prix_litre": str(tireuse_bec.prix_litre),
+        "monnaie": tireuse_bec.monnaie,
         "message": f"Badge accepté. Solde: {card.balance} €",
     }
 
@@ -314,8 +318,8 @@ def api_rfid_event(request):
     volume_float = float(event_data.get("volume_ml", 0.0))
     current_vol = Decimal(f"{volume_float}").quantize(Decimal("0.01"))
 
-    # Débit instantané transmis par le Pi (L/min), maintenant alimenté par FlowMeter.update()
-    debit_l_min = float(event_data.get("debit_l_min", 0.0))
+    # Débit instantané transmis par le Pi (cl/min)
+    debit_cl_min = float(event_data.get("debit_cl_min", 0.0))
 
     # Initialisation des variables
     target_uuid_raw = data.get("tireuse_bec")
@@ -449,6 +453,10 @@ def api_rfid_event(request):
                 "liquid_label": session.liquid_label_snapshot,
                 "balance": start_balance,
                 "volume_ml": 0.0,
+                "reservoir_ml": float(tireuse_bec.reservoir_ml),
+                "reservoir_max_ml": tireuse_bec.reservoir_max_ml,
+                "prix_litre": str(tireuse_bec.prix_litre),
+                "monnaie": tireuse_bec.monnaie,
                 "message": f"Servez-vous ! Solde: {start_balance}€",
             },
         )
@@ -565,10 +573,13 @@ def api_rfid_event(request):
                 "uid": uid,
                 "liquid_label": session.liquid_label_snapshot or "Bière",
                 "volume_ml": float(current_vol),
-                "debit_l_min": debit_l_min,
+                "debit_cl_min": debit_cl_min,
                 "charged": charged_display,
                 "balance": balance_display,
                 "reservoir_ml": float(tireuse_bec.reservoir_ml),
+                "reservoir_max_ml": tireuse_bec.reservoir_max_ml,
+                "prix_litre": str(tireuse_bec.prix_litre),
+                "monnaie": tireuse_bec.monnaie,
                 "message": f"Terminé : {current_vol:.0f} ml"
                 if session_done
                 else ("Solde épuisé !" if solde_epuise else "Service en cours..."),

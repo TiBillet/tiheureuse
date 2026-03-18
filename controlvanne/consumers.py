@@ -72,12 +72,17 @@ class PanelConsumer(AsyncJsonWebsocketConsumer):
         )
         return {
             "tireuse_bec": tb.nom_tireuse,
+            "tireuse_bec_uuid": str(tb.uuid),
             "liquid_label": tb.nom_boisson,
             "present": bool(open_s and open_s.uid),
             "authorized": bool(open_s.authorized) if open_s else False,
             "vanne_ouverte": False,
             "volume_ml": float(open_s.volume_end_ml if open_s else 0.0),
-            "debit_l_min": 0.0,
+            "debit_cl_min": 0.0,
+            "reservoir_ml": float(tb.reservoir_ml),
+            "reservoir_max_ml": tb.reservoir_max_ml,
+            "prix_litre": str(tb.prix_litre),
+            "monnaie": tb.monnaie,
             "message": open_s.last_message if open_s else "",
             "uid": open_s.uid if open_s else None,
         }

@@ -7,16 +7,101 @@
   <div class="row g-3" id="cards-grid">
     {% for b in becs %}
       <div class="col-12 col-md-6 col-lg-4" id="card-col-{{ b.uuid }}">
-        <div class="card h-100" data-uuid="{{ b.uuid }}">
+        <div class="card h-100"
+             data-uuid="{{ b.uuid }}"
+             data-maxreservoir="{{ b.reservoir_max_ml|floatformat:0 }}"
+             data-reservoir="{{ b.reservoir_ml|floatformat:0 }}">
           <div class="card-header d-flex justify-content-between align-items-center">
             <div>
               <span class="badge bg-secondary me-2">{{ b.nom_tireuse }}</span>
               <strong class="text-info" id="liquid-{{ b.uuid }}">{{ b.nom_boisson|default:"Liquide" }}</strong>
             </div>
-            <span class="badge bg-dark" id="uuid-badge-{{ b.uuid }}" title="{{ b.uuid }}" style="font-size:10px;cursor:pointer;" onclick="navigator.clipboard.writeText('{{ b.uuid }}')">{{ b.uuid|slice:":8" }}…</span>
           </div>
 
           <div class="card-body">
+
+            {# --- Jauge fût + Grille de prix --- #}
+            <div class="row g-2 mb-3">
+
+              {# Jauge aiguille #}
+              <div class="col-5 d-flex flex-column align-items-center justify-content-center">
+                <div style="font-size:9px; text-transform:uppercase; letter-spacing:1px; color:#999; margin-bottom:2px;">Fût</div>
+                <svg id="gauge-svg-{{ b.uuid }}" viewBox="0 0 100 58"
+                     style="width:100%; max-width:150px; overflow:visible;">
+
+                  {# Piste fond gris #}
+                  <path d="M 6,54 A 44,44 0 0,1 94,54"
+                        fill="none" stroke="#e0e0e0" stroke-width="7" stroke-linecap="butt"/>
+
+                  {# Arc de remplissage (mis à jour par JS) #}
+                  <path id="gauge-fill-{{ b.uuid }}" d=""
+                        fill="none" stroke="#27ae60" stroke-width="7" stroke-linecap="butt"/>
+
+                  {# Repères 25 / 50 / 75 / 100 % #}
+                  {# 25% θ=135° → outer(18.9,22.9) inner(23.1,27.1) label(30.2,33.2) #}
+                  <line x1="18.9" y1="22.9" x2="23.1" y2="27.1"
+                        stroke="#bbb" stroke-width="1.5" stroke-linecap="round"/>
+                  <text x="26" y="37" font-size="5.5" fill="#aaa" text-anchor="middle">25%</text>
+
+                  {# 50% θ=90° → outer(50,10) inner(50,16) label(50,24) #}
+                  <line x1="50" y1="10" x2="50" y2="16"
+                        stroke="#bbb" stroke-width="1.5" stroke-linecap="round"/>
+                  <text x="50" y="24" font-size="5.5" fill="#aaa" text-anchor="middle">50%</text>
+
+                  {# 75% θ=45° → outer(81.1,22.9) inner(76.9,27.1) label(73.8,33.2) #}
+                  <line x1="81.1" y1="22.9" x2="76.9" y2="27.1"
+                        stroke="#bbb" stroke-width="1.5" stroke-linecap="round"/>
+                  <text x="74" y="37" font-size="5.5" fill="#aaa" text-anchor="middle">75%</text>
+
+                  {# 100% θ=0° → outer(94,54) inner(88,54) #}
+                  <line x1="94" y1="54" x2="88" y2="54"
+                        stroke="#bbb" stroke-width="1.5" stroke-linecap="round"/>
+                  <text x="91" y="50" font-size="5.5" fill="#aaa" text-anchor="end">100%</text>
+
+                  {# Aiguille (mise à jour par JS) — pointe vers 0% par défaut (gauche) #}
+                  <line id="gauge-needle-{{ b.uuid }}"
+                        x1="50" y1="54" x2="12" y2="54"
+                        stroke="#2c3e50" stroke-width="2.5" stroke-linecap="round"/>
+
+                  {# Centre de l'aiguille #}
+                  <circle cx="50" cy="54" r="4" fill="#2c3e50"/>
+                  <circle cx="50" cy="54" r="1.8" fill="white"/>
+                </svg>
+              </div>
+
+              {# Grille de prix #}
+              <div class="col-7"
+                   data-prixlitre="{{ b.prix_litre }}"
+                   data-monnaie="{{ b.monnaie }}"
+                   id="prix-block-{{ b.uuid }}">
+                <div style="font-size:12px; line-height:1.8;">
+                  <div class="d-flex justify-content-between"
+                       style="border-bottom:1px solid #e0e0e0; padding-bottom:2px; margin-bottom:2px;">
+                    <span class="text-muted">Prix/Litre</span>
+                    <span>
+                      <b id="prixL-{{ b.uuid }}">{{ b.prix_litre }}</b>
+                      <span class="text-muted" id="monnaieL-{{ b.uuid }}">{{ b.monnaie }}</span>
+                    </span>
+                  </div>
+                  <div class="d-flex justify-content-between">
+                    <span class="text-muted">25 cl</span>
+                    <b id="p25-{{ b.uuid }}">—</b>
+                  </div>
+                  <div class="d-flex justify-content-between">
+                    <span class="text-muted">33 cl</span>
+                    <b id="p33-{{ b.uuid }}">—</b>
+                  </div>
+                  <div class="d-flex justify-content-between">
+                    <span class="text-muted">50 cl</span>
+                    <b id="p50-{{ b.uuid }}">—</b>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <hr class="my-2">
+
+            {# --- État en temps réel --- #}
             <div class="d-flex align-items-center mb-2">
               <span class="me-2">État vanne :</span>
               <span class="badge bg-danger" id="state-{{ b.uuid }}">Fermée</span>
@@ -30,26 +115,18 @@
               <span class="badge bg-secondary" id="auth-{{ b.uuid }}">—</span>
             </div>
 
-            <div class="mb-2">
-              <div class="d-flex justify-content-between">
-                <span>Débit (L/min)</span>
-                <span class="stat" id="flow-{{ b.uuid }}">0.00</span>
-              </div>
-              <div class="progress" style="height:6px;">
-                <div class="progress-bar" id="flowbar-{{ b.uuid }}" role="progressbar" style="width:0%"></div>
-              </div>
+            <div class="d-flex justify-content-between">
+              <span>Volume servi</span>
+              <span class="stat" id="vol-{{ b.uuid }}">0 cl</span>
             </div>
 
-            <div class="d-flex justify-content-between">
-              <span>Volume (ml)</span>
-              <span class="stat" id="vol-{{ b.uuid }}">0</span>
-            </div>
-            
             <div class="mt-3 text-center" style="font-size:20px;color:#2c3e50">
-              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 16 16" style="vertical-align: middle; margin-bottom: 3px;">
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor"
+                   viewBox="0 0 16 16" style="vertical-align:middle; margin-bottom:3px;">
                <path d="M0 4a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V4zm2-1a1 1 0 0 0-1 1v1h14V4a1 1 0 0 0-1-1H2zm13 4H1v5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V7z"/>
                <path d="M2 10a1 1 0 0 1 1-1h1a1 1 0 0 1 1 1v1a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1v-1z"/>
-            </svg> Solde: <b id="balance-{{ b.uuid }}" style="color:#27ae60">—</b> €
+              </svg>
+              Solde: <b id="balance-{{ b.uuid }}" style="color:#27ae60">—</b> €
             </div>
           </div>
 
@@ -70,28 +147,83 @@
 <script>
 (function(){
   const cards = {};
+  const CX = 50, CY = 54, R_ARC = 44, R_NEEDLE = 38;
 
-  // Initialisation : On récupère les éléments HTML
+  // Met à jour la jauge SVG pour un niveau donné (0..1)
+  function updateGauge(c, reservoirMl, maxMl) {
+    const pct = maxMl > 0 ? Math.min(Math.max(reservoirMl / maxMl, 0), 1) : 0;
+    const theta = (1 - pct) * Math.PI; // π=gauche(0%) → 0=droite(100%)
+
+    // Arc de remplissage
+    const fill = c.gaugeFill;
+    if (fill) {
+      if (pct < 0.002) {
+        fill.setAttribute('d', '');
+      } else if (pct > 0.998) {
+        fill.setAttribute('d', `M 6,${CY} A ${R_ARC},${R_ARC} 0 0,1 94,${CY}`);
+      } else {
+        const ex = (CX + R_ARC * Math.cos(theta)).toFixed(2);
+        const ey = (CY - R_ARC * Math.sin(theta)).toFixed(2);
+        fill.setAttribute('d', `M 6,${CY} A ${R_ARC},${R_ARC} 0 0,1 ${ex},${ey}`);
+      }
+      const color = pct > 0.5 ? '#27ae60' : (pct > 0.25 ? '#f39c12' : '#e74c3c');
+      fill.setAttribute('stroke', color);
+    }
+
+    // Aiguille
+    const needle = c.gaugeNeedle;
+    if (needle) {
+      const nx = (CX + R_NEEDLE * Math.cos(theta)).toFixed(2);
+      const ny = (CY - R_NEEDLE * Math.sin(theta)).toFixed(2);
+      needle.setAttribute('x2', nx);
+      needle.setAttribute('y2', ny);
+    }
+  }
+
+  // Calcule et affiche les prix
+  function updatePrix(c, prixLitre, monnaie) {
+    const pL = parseFloat(prixLitre) || 0;
+    const mon = monnaie || '';
+    c.prixL.textContent = pL.toFixed(2);
+    c.monnaieL.textContent = mon;
+    c.p25.textContent = (pL * 0.25).toFixed(2) + ' ' + mon;
+    c.p33.textContent = (pL * 0.33).toFixed(2) + ' ' + mon;
+    c.p50.textContent = (pL * 0.50).toFixed(2) + ' ' + mon;
+  }
+
+  // Initialisation des éléments HTML par carte
   document.querySelectorAll('.card[data-uuid]').forEach(card => {
-    const uuid = card.dataset.uuid; // UUID de la tireuse
+    const uuid = card.dataset.uuid;
+    const maxMl = parseFloat(card.dataset.maxreservoir) || 1;
+    const prixBlock = document.getElementById('prix-block-' + uuid);
     cards[uuid] = {
-      uuid: uuid,
-      uid: document.getElementById('uid-'+uuid),
-      auth: document.getElementById('auth-'+uuid),
-      state: document.getElementById('state-'+uuid),
-      flow: document.getElementById('flow-'+uuid),
-      flowbar: document.getElementById('flowbar-'+uuid),
-      vol: document.getElementById('vol-'+uuid),
-      msg: document.getElementById('msg-'+uuid),
-      liquid: document.getElementById('liquid-'+uuid),
-      balance: document.getElementById('balance-'+uuid),
+      uuid, maxMl,
+      uid:         document.getElementById('uid-'    + uuid),
+      auth:        document.getElementById('auth-'   + uuid),
+      state:       document.getElementById('state-'  + uuid),
+      vol:         document.getElementById('vol-'    + uuid),
+      msg:         document.getElementById('msg-'    + uuid),
+      liquid:      document.getElementById('liquid-' + uuid),
+      balance:     document.getElementById('balance-'+ uuid),
+      gaugeFill:   document.getElementById('gauge-fill-'  + uuid),
+      gaugeNeedle: document.getElementById('gauge-needle-'+ uuid),
+      prixL:       document.getElementById('prixL-'  + uuid),
+      monnaieL:    document.getElementById('monnaieL-'+ uuid),
+      p25:         document.getElementById('p25-'    + uuid),
+      p33:         document.getElementById('p33-'    + uuid),
+      p50:         document.getElementById('p50-'    + uuid),
       lastBalance: null,
       wasPresent: false,
-      container: card // Utile pour debugging visuel eventuel
     };
+    // Init prix et jauge depuis template
+    if (prixBlock) {
+      updatePrix(cards[uuid], prixBlock.dataset.prixlitre, prixBlock.dataset.monnaie);
+    }
+    // Init jauge avec reservoir_ml courant (template ne donne pas le % directement)
+    // La jauge commence à 0% jusqu'au premier message WS
   });
-  
-  // Créer le popup global
+
+  // Popup fin de service
   let popup = document.getElementById('global-popup');
   if (!popup) {
     popup = document.createElement('div');
@@ -104,201 +236,141 @@
     `;
     document.body.appendChild(popup);
   }
-  
   let popupTimeout = null;
   function showPopup(balance) {
-    console.log('🍺 AFFICHAGE POPUP - Solde:', balance);
-    const popupBalance = document.getElementById('popup-balance');
-    if (popupBalance) popupBalance.textContent = balance;
+    const el = document.getElementById('popup-balance');
+    if (el) el.textContent = balance;
     popup.style.display = 'block';
-    popup.style.opacity = '1';
     if (popupTimeout) clearTimeout(popupTimeout);
-    popupTimeout = setTimeout(() => {
-      popup.style.display = 'none';
-    }, 5000);
+    popupTimeout = setTimeout(() => { popup.style.display = 'none'; }, 5000);
   }
 
-  // Fonction de Remise à Zéro (Mode gris)
+  // Remise à zéro de la carte (mode attente)
   function resetCardUI(c) {
-    if(!c) return;
+    if (!c) return;
     c.uid.innerHTML = '&mdash;';
-
-    // On force le badge en GRIS
     c.auth.className = 'badge bg-secondary';
     c.auth.textContent = 'En attente';
-
-    // Reset Vanne et Volumes
     c.state.className = 'badge bg-danger';
     c.state.textContent = 'Fermée';
-    c.flow.textContent = '0.00';
-    c.flowbar.style.width = '0%';
-    c.vol.textContent = '0';
+    c.vol.textContent = '0 cl';
     c.msg.textContent = 'Posez votre badge...';
-    
-    // Reset solde
     c.balance.textContent = '—';
   }
 
-  // Helper Couleurs
-  function setBadge(el, ok){
+  function setBadge(el, ok) {
     el.className = 'badge ' + (ok ? 'bg-success' : 'bg-danger');
     el.textContent = ok ? 'Autorisé' : 'Refusé';
   }
 
-  // --- WEBSOCKET ---
+  // WebSocket
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-
-  // Connexion au canal demandé (ou "all" par défaut)
   const slugFocus = "{{ slug_focus }}";
   const wsPath = (!slugFocus || slugFocus === 'all') ? '/ws/rfid/all/' : `/ws/rfid/${slugFocus}/`;
-
   const ws = new WebSocket(`${proto}://${location.host}${wsPath}`);
 
   ws.onopen = () => console.log("WS Connecté sur", wsPath);
 
   ws.onmessage = ev => {
-      try {
-          const data = JSON.parse(ev.data);
-          const payload = data.payload || data;
+    try {
+      const data = JSON.parse(ev.data);
+      const payload = data.payload || data;
 
-          // Commandes kiosk
-          if (payload.kiosk_url) { window.location.href = payload.kiosk_url; return; }
-          if (payload.kiosk_reload) { window.location.reload(); return; }
+      if (payload.kiosk_url)    { window.location.href = payload.kiosk_url; return; }
+      if (payload.kiosk_reload) { window.location.reload(); return; }
 
-          // Maintenance
-          if (payload.maintenance) {
-              const uuid = payload.tireuse_bec_uuid || '';
-              const c = cards[uuid] || Object.values(cards)[0];
-              if (c) {
-                  c.state.className = 'badge bg-warning text-dark';
-                  c.state.textContent = 'Maintenance';
-                  c.auth.className = 'badge bg-warning text-dark';
-                  c.auth.textContent = 'Hors service';
-                  c.msg.textContent = 'En Maintenance';
-                  if (payload.uid) {
-                      c.uid.textContent = payload.uid;
-                  } else {
-                      c.uid.innerHTML = '&mdash;';
-                  }
-                  c.flow.textContent = '0.00';
-                  c.flowbar.style.width = '0%';
-                  c.vol.textContent = '0';
-                  c.balance.textContent = (payload.balance !== undefined) ? payload.balance : '—';
-              }
-              return;
-          }
+      // Maintenance
+      if (payload.maintenance) {
+        const uuid = payload.tireuse_bec_uuid || '';
+        const c = cards[uuid] || Object.values(cards)[0];
+        if (c) {
+          c.state.className = 'badge bg-warning text-dark';
+          c.state.textContent = 'Maintenance';
+          c.auth.className = 'badge bg-warning text-dark';
+          c.auth.textContent = 'Hors service';
+          c.msg.textContent = 'En Maintenance';
+          c.uid.textContent = payload.uid || '—';
+          c.vol.textContent = '0 cl';
+          c.balance.textContent = (payload.balance !== undefined) ? payload.balance : '—';
+        }
+        return;
+      }
 
-          // Identification de la cible par UUID
-          const targetUuid = payload.tireuse_bec_uuid || payload.tireuse_bec || '';
+      const targetUuid = payload.tireuse_bec_uuid || payload.tireuse_bec || '';
+      let targets = [];
+      if (targetUuid === 'all') {
+        targets = Object.values(cards);
+      } else if (cards[targetUuid]) {
+        targets = [cards[targetUuid]];
+      } else if (slugFocus === 'all') {
+        console.warn("Reçu event pour", targetUuid, "mais pas de carte trouvée.");
+        return;
+      }
 
-          // On cherche quelles cartes mettre à jour sur l'écran
-          let targets = [];
-          if (targetUuid === 'all') {
-             targets = Object.values(cards); // Tout le mur
-          } else if (cards[targetUuid]) {
-             targets = [cards[targetUuid]]; // Une seule carte
-          } else if (slugFocus === 'all') {
-             // Si on est sur le mur ALL mais qu'on ne trouve pas la carte, on ignore ou on log
-             console.warn("Reçu event pour", targetUuid, "mais pas de carte HTML trouvée.");
-             return;
-          }
+      targets.forEach(c => {
+        // Mise à jour jauge (tous les messages)
+        if (payload.reservoir_ml !== undefined) {
+          const maxMl = payload.reservoir_max_ml || c.maxMl;
+          c.maxMl = maxMl;
+          updateGauge(c, payload.reservoir_ml, maxMl);
+        }
 
-          targets.forEach(c => {
-              // Sauvegarder l'état précédent
-              const wasPresent = c.wasPresent;
-              
-              // -------------------------------------------------
-              // CAS 1 : Carte présente sur le lecteur
-              // -------------------------------------------------
-              if (payload.present) {
-                  c.wasPresent = true;
-                  c.uid.textContent = payload.uid || 'Lu...';
+        // Mise à jour prix si envoyés
+        if (payload.prix_litre !== undefined || payload.monnaie !== undefined) {
+          const pL  = payload.prix_litre !== undefined ? payload.prix_litre : parseFloat(c.prixL.textContent);
+          const mon = payload.monnaie    !== undefined ? payload.monnaie    : c.monnaieL.textContent;
+          updatePrix(c, pL, mon);
+        }
 
-                  // Autorisation (Vert ou Rouge)
-                  if (typeof payload.authorized !== 'undefined') {
-                      setBadge(c.auth, payload.authorized);
-                  }
+        // CAS 1 : Carte présente
+        if (payload.present) {
+          c.wasPresent = true;
+          c.uid.textContent = payload.uid || 'Lu...';
+          if (typeof payload.authorized !== 'undefined') setBadge(c.auth, payload.authorized);
+          c.state.className = payload.vanne_ouverte ? 'badge bg-success' : 'badge bg-danger';
+          c.state.textContent = payload.vanne_ouverte ? 'Ouverte' : 'Fermée';
+          c.vol.textContent = Math.round((payload.volume_ml || 0) / 10) + ' cl';
+          if (payload.balance) { c.balance.textContent = payload.balance; c.lastBalance = payload.balance; }
+          if (payload.message) c.msg.textContent = payload.message;
+          return;
+        }
 
-                  // Vanne et Débit
-                  if (payload.vanne_ouverte) {
-                      c.state.className = 'badge bg-success';
-                      c.state.textContent = 'Ouverte';
-                  } else {
-                      c.state.className = 'badge bg-danger';
-                      c.state.textContent = 'Fermée';
-                  }
+        c.wasPresent = false;
 
-                  c.flow.textContent = (payload.debit_l_min || 0).toFixed(2);
-                  const flowPct = Math.min((payload.debit_l_min || 0) * 10, 100);
-                  c.flowbar.style.width = flowPct + '%';
-                  c.vol.textContent = (payload.volume_ml || 0).toFixed(0);
-                  
-                  // Afficher le solde
-                  if (payload.balance) {
-                      c.balance.textContent = payload.balance;
-                      c.lastBalance = payload.balance;
-                  }
+        // CAS 2 : Fin de session
+        if (payload.session_done) {
+          c.auth.className = 'badge bg-info text-dark';
+          c.auth.textContent = 'Terminé';
+          c.state.className = 'badge bg-danger';
+          c.state.textContent = 'Fermée';
+          c.vol.textContent = Math.round((payload.volume_ml || 0) / 10) + ' cl';
+          if (payload.balance) { c.balance.textContent = payload.balance; c.lastBalance = payload.balance; }
+          if (payload.message) c.msg.textContent = payload.message;
+          if (c.lastBalance && parseFloat(payload.volume_ml || 0) > 0) showPopup(c.lastBalance);
+          setTimeout(() => resetCardUI(c), 5000);
+          return;
+        }
 
-                  if (payload.message) c.msg.textContent = payload.message;
-                  
-                  return;
-              }
-              
-              c.wasPresent = false;
+        // CAS 3 : Retrait / refus
+        resetCardUI(c);
+        c.auth.className = 'badge bg-secondary';
+        c.msg.textContent = 'En attente...';
+        c.balance.textContent = '—';
+      });
 
-              // -------------------------------------------------
-              // CAS 2 : Fin de session (avec un rapport final)
-              // -------------------------------------------------
-              if (payload.session_done) {
-                  // On fige l'affichage en Bleu pour dire "Fini"
-                  c.auth.className = 'badge bg-info text-dark';
-                  c.auth.textContent = 'Terminé';
-                  c.state.className = 'badge bg-danger';
-                  c.state.textContent = 'Fermée';
-
-                  c.vol.textContent = (payload.volume_ml || 0).toFixed(0);
-                  
-                  // Mettre à jour le solde final
-                  if (payload.balance) {
-                      c.balance.textContent = payload.balance;
-                      c.lastBalance = payload.balance;
-                  }
-                  
-                  if (payload.message) c.msg.textContent = payload.message;
-
-                  // Afficher le popup de fin de service UNIQUEMENT si on a servi quelque chose
-                  const finalVolume = parseFloat(payload.volume_ml || 0);
-                  if (c.lastBalance && finalVolume > 0) {
-                      showPopup(c.lastBalance);
-                  }
-
-                  // On efface tout après 5 secondes (laisser le temps de voir le popup)
-                  setTimeout(() => resetCardUI(c), 5000);
-                  return;
-              }
-
-              // -------------------------------------------------
-              // CAS 3 : RETRAIT DE CARTE / PAS DE SESSION (carte refusée ou retirée sans servir)
-              // -------------------------------------------------
-              console.log('🔄 REINITIALISATION CARTE RETIREE - WasPresent:', wasPresent, 'Message:', payload.message);
-              
-              // Réinitialiser complètement l'interface
-              resetCardUI(c);
-              
-              // Forcer explicitement la réinitialisation de l'autorisation
-              c.auth.className = 'badge bg-secondary';
-              //c.auth.textContent = 'En attente';
-              if (payload.message) c.msg.textContent = payload.message;
-              c.msg.textContent = 'En attente...';
-              c.balance.textContent = '—';
-          });
-
-      } catch(e) { console.error("Erreur WS JS:", e); }
+    } catch(e) { console.error("Erreur WS JS:", e); }
   };
+
+  // Init jauges depuis les valeurs du template (rendu serveur)
+  document.querySelectorAll('.card[data-uuid]').forEach(card => {
+    const uuid = card.dataset.uuid;
+    const c = cards[uuid];
+    if (!c) return;
+    const initReservoir = parseFloat(card.dataset.reservoir) || 0;
+    updateGauge(c, initReservoir, c.maxMl);
+  });
+
 })();
 </script>
-
-
-
 
 {% endblock %}

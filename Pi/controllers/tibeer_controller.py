@@ -140,7 +140,7 @@ class TibeerController:
         if (now - self.last_update_ts) > UPDATE_INTERVAL_S:
             current_total_vol = self.flow_meter.volume_l() * 1000.0
             served_vol = current_total_vol - self.session_start_vol
-            flow_rate = self.flow_meter.get_flow_rate()
+            flow_rate_cl = self.flow_meter.get_flow_rate_cl()
 
             # Envoyer l'event et vérifier la réponse
             try:
@@ -148,7 +148,7 @@ class TibeerController:
                     "pour_update",
                     self.current_uid,
                     self.session_id,
-                    {"volume_ml": served_vol, "debit_l_min": flow_rate},
+                    {"volume_ml": served_vol, "debit_cl_min": flow_rate_cl},
                 )
             except BackendError as e:
                 logger.warning(
@@ -166,7 +166,7 @@ class TibeerController:
                     "pour_end",
                     self.current_uid,
                     self.session_id,
-                    {"volume_ml": served_vol, "debit_l_min": flow_rate},
+                    {"volume_ml": served_vol, "debit_cl_min": flow_rate_cl},
                 )
                 self.is_serving = False
                 return
@@ -202,7 +202,7 @@ class TibeerController:
                 "pour_end",
                 self.current_uid,
                 self.session_id,
-                {"volume_ml": served_vol, "debit_l_min": 0.0},
+                {"volume_ml": served_vol, "debit_cl_min": 0.0},
             )
 
         self.is_serving = False
