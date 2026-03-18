@@ -20,9 +20,9 @@ def snapshot_for_bec(tb: TireuseBec):
         .first()
     )
     return {
-        "tireuse_bec": tb.name,
+        "tireuse_bec": tb.nom_tireuse,
         "tireuse_bec_uuid": str(tb.uuid),
-        "liquid_label": tb.liquid_label,
+        "liquid_label": tb.nom_boisson,
         "present": bool(open_s and open_s.uid),
         "authorized": bool(open_s.authorized) if open_s else False,
         "vanne_ouverte": False,
@@ -40,7 +40,7 @@ def _remember_old_name(sender, instance: TireuseBec, **kwargs):
         return
     try:
         old = TireuseBec.objects.get(pk=instance.pk)
-        instance._old_name = old.name
+        instance._old_name = old.nom_tireuse
     except TireuseBec.DoesNotExist:
         instance._old_name = None
 
@@ -62,7 +62,7 @@ def on_tireusebec_changed(sender, instance: TireuseBec, created, **kwargs):
 
     # Si renommage : notifier les écrans encore abonnés à l'ancien nom
     old_name = getattr(instance, "_old_name", None)
-    if old_name and old_name != instance.name:
+    if old_name and old_name != instance.nom_tireuse:
         async_to_sync(ch.group_send)(
             f"rfid_state.{instance.uuid}",
             {"type": "state_update", "payload": {"redirect_to": instance.name}},

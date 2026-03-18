@@ -15,27 +15,30 @@ class TireuseBecAdmin(admin.ModelAdmin):
     list_display = (
         "name_with_uuid",
         "debimetre",
-        "liquid_label",
+        "nom_boisson",
+        "monnaie",
+        "prix_litre",
+        "col_25cl",
+        "col_33cl",
+        "col_50cl",
         "reservoir_ml",
         "seuil_mini_ml",
         "appliquer_reserve",
-        "unit_label",
-        "unit_ml",
         "enabled",
         "notes",
     )
     list_editable = (
         "debimetre",
-        "liquid_label",
-        "unit_label",
-        "unit_ml",
+        "nom_boisson",
+        "monnaie",
+        "prix_litre",
         "enabled",
     )
-    search_fields = ("name", "liquid_label", "notes")
+    search_fields = ("nom_tireuse", "nom_boisson", "notes")
 
     @admin.display(description="Name")
     def name_with_uuid(self, obj):
-        return format_html('<span title="UUID: {}">{}</span>', obj.uuid, obj.name)
+        return format_html('<span title="UUID: {}">{}</span>', obj.uuid, obj.nom_tireuse)
 
     @admin.display(description="UUID")
     def uuid_readonly(self, obj):
@@ -46,7 +49,26 @@ class TireuseBecAdmin(admin.ModelAdmin):
         )
 
     def get_readonly_fields(self, request, obj=None):
-        return ("uuid",) + super().get_readonly_fields(request, obj)
+        return ("uuid", "col_25cl", "col_33cl", "col_50cl") + super().get_readonly_fields(request, obj)
+
+    def _prix_volume(self, obj, cl):
+        from decimal import Decimal
+        if obj.prix_litre and obj.prix_litre > 0:
+            val = (obj.prix_litre * Decimal(str(cl)) / 100).quantize(Decimal("0.01"))
+            return f"{val} {obj.monnaie}"
+        return "—"
+
+    @admin.display(description="25 cl")
+    def col_25cl(self, obj):
+        return self._prix_volume(obj, 25)
+
+    @admin.display(description="33 cl")
+    def col_33cl(self, obj):
+        return self._prix_volume(obj, 33)
+
+    @admin.display(description="50 cl")
+    def col_50cl(self, obj):
+        return self._prix_volume(obj, 50)
 
     # def push_kiosk_url(self, request, queryset):
     #     ch = get_channel_layer()
@@ -152,9 +174,9 @@ def export_sessions_csv(modeladmin, request, queryset):
             "started_at",
             "ended_at",
             "duration_s",
-            "volume_start_ml",
-            "volume_end_ml",
-            "volume_delta_ml",
+            "volume_start_cl",
+            "volume_end_cl",
+            "volume_servi_cl",
         ]
     )
     for s in queryset:
@@ -162,16 +184,16 @@ def export_sessions_csv(modeladmin, request, queryset):
             [
                 s.id,
                 s.uid,
-                s.tireuse_bec.name,
+                s.tireuse_bec.nom_tireuse,
                 s.liquid_label_snapshot,
                 s.label_snapshot,
                 s.authorized,
                 s.started_at,
                 s.ended_at,
                 (s.duration_seconds or ""),
-                f"{s.volume_start_ml:.1f}",
-                f"{s.volume_end_ml:.1f}",
-                f"{s.volume_delta_ml:.1f}",
+                f"{s.volume_start_ml / 10:.1f}",
+                f"{s.volume_end_ml / 10:.1f}",
+                f"{s.volume_delta_ml / 10:.1f}",
             ]
         )
     return resp
@@ -189,9 +211,13 @@ class RfidSessionAdmin(admin.ModelAdmin):
         "authorized",
         "started_at",
         "ended_at",
-        "volume_delta_ml",
+        "volume_servi_cl",
         "label_snapshot",
     )
+
+    @admin.display(description="Volume servi (cl)", ordering="volume_delta_ml")
+    def volume_servi_cl(self, obj):
+        return f"{obj.volume_delta_ml / 10:.1f}"
     list_filter = ("authorized", "tireuse_bec")
     search_fields = (
         "uid",

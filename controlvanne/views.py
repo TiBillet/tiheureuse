@@ -228,9 +228,9 @@ def api_rfid_authorize(request):
             started_at=timezone.now(),
             volume_start_ml=0.0,
             authorized=True,
-            liquid_label_snapshot=tireuse_bec.liquid_label,
+            liquid_label_snapshot=tireuse_bec.nom_boisson,
             label_snapshot=card.label,
-            unit_label_snapshot=tireuse_bec.unit_label,
+            unit_label_snapshot=tireuse_bec.monnaie,
             unit_ml_snapshot=tireuse_bec.unit_ml,
             allowed_ml_session=max_volume_ml,
         )
@@ -239,18 +239,18 @@ def api_rfid_authorize(request):
 
     # 5. SUCCÈS : Notification Écran (VERT)
     payload_ws = {
-        "tireuse_bec": tireuse_bec.name,
+        "tireuse_bec": tireuse_bec.nom_tireuse,
         "tireuse_bec_uuid": str(tireuse_bec.uuid),
         "present": True,
         "authorized": True,  # Vert
         "vanne_ouverte": True,  # Vert
         "uid": uid,
-        "liquid_label": tireuse_bec.liquid_label,
+        "liquid_label": tireuse_bec.nom_boisson,
         "balance": str(card.balance),
         "message": f"Badge accepté. Solde: {card.balance} €",
     }
 
-    print(f"✅ SUCCÈS {uid} sur {tireuse_bec.name}")
+    print(f"✅ SUCCÈS {uid} sur {tireuse_bec.nom_tireuse}")
 
     # On utilise la _ws_push
     _ws_push(tireuse_bec, payload_ws)
@@ -266,8 +266,8 @@ def api_rfid_authorize(request):
             "authorized": True,
             "session_id": open_session.id,
             "balance": str(card.balance),
-            "liquid_label": tireuse_bec.liquid_label,
-            "unit_label": tireuse_bec.unit_label,
+            "liquid_label": tireuse_bec.nom_boisson,
+            "unit_label": tireuse_bec.monnaie,
             "unit_ml": str(tireuse_bec.unit_ml),
             "flow_calibration_factor": flow_factor,
         }
@@ -383,7 +383,7 @@ def api_rfid_event(request):
         _ws_push(
             tireuse_bec,
             {
-                "tireuse_bec": tireuse_bec.name,
+                "tireuse_bec": tireuse_bec.nom_tireuse,
                 "tireuse_bec_uuid": str(tireuse_bec.uuid),
                 "present": False,
                 "uid": "",
@@ -416,7 +416,7 @@ def api_rfid_event(request):
         _ws_push(
             tireuse_bec,
             {
-                "tireuse_bec": tireuse_bec.name,
+                "tireuse_bec": tireuse_bec.nom_tireuse,
                 "tireuse_bec_uuid": str(tireuse_bec.uuid),
                 "present": True,
                 "authorized": True,
@@ -530,7 +530,7 @@ def api_rfid_event(request):
                 force_close = True
 
             data_to_send = {
-                "tireuse_bec": tireuse_bec.name,
+                "tireuse_bec": tireuse_bec.nom_tireuse,
                 "tireuse_bec_uuid": str(tireuse_bec.uuid),
                 "present": True if not session_done else False,
                 "authorized": True,
@@ -552,7 +552,7 @@ def api_rfid_event(request):
             # 4. On envoie.
             # - "type" doit correspondre au nom de la méthode dans Consumer (`async def state_update`)
             # - Le consumer attend les données dans une clé "payload"
-            print(f"🚀 ENVOI WS vers '{tireuse_bec.name}' ET vers 'ALL'")
+            print(f"🚀 ENVOI WS vers '{tireuse_bec.nom_tireuse}' ET vers 'ALL'")
 
             # 1. Envoi au canal SPÉCIFIQUE (pour l'écran du Pi)
 

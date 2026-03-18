@@ -60,8 +60,8 @@ class PanelConsumer(AsyncJsonWebsocketConsumer):
             .first()
         )
         return {
-            "tireuse_bec": tb.name,
-            "liquid_label": tb.liquid_label,
+            "tireuse_bec": tb.nom_tireuse,
+            "liquid_label": tb.nom_boisson,
             "present": bool(open_s and open_s.uid),
             "authorized": bool(open_s.authorized) if open_s else False,
             "vanne_ouverte": False,

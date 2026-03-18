@@ -10,8 +10,8 @@
         <div class="card h-100" data-uuid="{{ b.uuid }}">
           <div class="card-header d-flex justify-content-between align-items-center">
             <div>
-              <span class="badge bg-secondary me-2">{{ b.name }}</span>
-              <strong class="text-info" id="liquid-{{ b.uuid }}">{{ b.liquid_label|default:"Liquide" }}</strong>
+              <span class="badge bg-secondary me-2">{{ b.nom_tireuse }}</span>
+              <strong class="text-info" id="liquid-{{ b.uuid }}">{{ b.nom_boisson|default:"Liquide" }}</strong>
             </div>
             <span class="badge bg-dark" id="uuid-badge-{{ b.uuid }}" title="{{ b.uuid }}" style="font-size:10px;cursor:pointer;" onclick="navigator.clipboard.writeText('{{ b.uuid }}')">{{ b.uuid|slice:":8" }}…</span>
           </div>
