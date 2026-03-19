@@ -160,6 +160,12 @@ echo "needs_root_rights=yes" | sudo tee -a /etc/X11/Xwrapper.config >/dev/null
 echo ""
 echo "[5/10] 🐍 Clonage et Installation Python..."
 
+# Installation des dépendances système pour ACR122U avant la compilation de pyscard
+if [ "$RFID_TYPE" = "ACR122U" ]; then
+    echo "   📦 Installation pcscd + libpcsclite-dev + swig (requis pour compiler pyscard)..."
+    sudo apt-get install -y --no-install-recommends pcscd libpcsclite-dev swig
+fi
+
 # Création Venv
 echo "Création de l'environnement virtuel dans $VENV_DIR..."
 cd "$TARGET_DIR"
@@ -229,11 +235,6 @@ RFID_BAUDRATE=$RFID_BAUDRATE
 EOF
 fi
 
-# Installation pcscd si ACR122U (démon PC/SC requis pour pyscard)
-if [ "$RFID_TYPE" = "ACR122U" ]; then
-    echo "   📦 Installation pcscd (requis pour ACR122U)..."
-    sudo apt-get install -y --no-install-recommends pcscd libpcsclite-dev
-fi
 
 chmod 600 "$TARGET_DIR/.env"
 
