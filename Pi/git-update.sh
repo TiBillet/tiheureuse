@@ -34,7 +34,7 @@ if [ ! -d ".git" ]; then
             echo "⚠️  Conflit détecté, utilisation de la version distante..."
             git checkout --theirs .
             git add -A
-            git commit -m "Auto-merge: utilisation de la version distante"
+            git commit -m "Auto-merge: use remote version"
         }
     }
     

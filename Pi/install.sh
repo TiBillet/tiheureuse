@@ -19,7 +19,7 @@ VENV_DIR="$TARGET_DIR/.venv"
 # Valeurs exemple par defaut
 # ==========================================
 DEFAULT_DJANGO_SERVER="http://192.168.1.10:8000"
-DEFAULT_GIT_REPO=git@github.com:TiBillet/tiheureuse.git
+DEFAULT_GIT_REPO="https://github.com/TiBillet/tiheureuse.git"
 DEFAULT_GIT_BRANCH="master"
 DEFAULT_TIREUSE_ID="b7100a7b-a1ff-4664-b2a0-e5b47d992d8a"
 
@@ -46,102 +46,58 @@ sudo sed -i 's/^# *fr_FR.UTF-8 UTF-8/fr_FR.UTF-8 UTF-8/' /etc/locale.gen
 sudo locale-gen || true
 
 # ==========================================
-# ÉTAPE 2 : Configuration SSH & Clonage
+# ÉTAPE 2 : Configuration & Clonage HTTPS
 # ==========================================
 echo "[2/10] 📝 Configuration..."
 
-# 1.1 Variables
-
 echo "🔹 Adresse IP du serveur Django"
 read -p "   (Défaut: $DEFAULT_DJANGO_SERVER) : " DJANGO_SERVER
-# Si la variable est vide, on prend la valeur par défaut
 DJANGO_SERVER=${DJANGO_SERVER:-$DEFAULT_DJANGO_SERVER}
-# Nettoyage du slash de fin
 DJANGO_SERVER=${DJANGO_SERVER%/}
 echo "   -> Utilisation de : $DJANGO_SERVER"
 
-# --- Demande Nom Tireuse ---
 read -p "🔹 Nom de la tireuse (UUID) [Défaut: $DEFAULT_TIREUSE_ID] : " TIREUSE_BEC
 TIREUSE_BEC=${TIREUSE_BEC:-$DEFAULT_TIREUSE_ID}
 
-# 2.2 SSH GitHub
+read -p "🔹 Branche Git [Défaut: $DEFAULT_GIT_BRANCH] : " GIT_BRANCH
+GIT_BRANCH=${GIT_BRANCH:-$DEFAULT_GIT_BRANCH}
+GIT_REPO="$DEFAULT_GIT_REPO"
+
 echo ""
-echo "--- 🔑 Configuration SSH pour GitHub ---"
-if [ ! -f ~/.ssh/id_rsa.pub ]; then
-    echo "Génération de la clé SSH..."
-    ssh-keygen -t rsa -b 4096 -f ~/.ssh/id_rsa -N "" -q
+echo "--- 📥 Clonage du dépôt (HTTPS, sans clé SSH) ---"
+echo "   Repo   : $GIT_REPO"
+echo "   Branche: $GIT_BRANCH"
+
+TEMP_DIR="/tmp/tibeer_temp_clone"
+rm -rf "$TEMP_DIR"
+
+# Backup si le dossier cible existe déjà
+if [ "$(ls -A $TARGET_DIR 2>/dev/null)" ]; then
+    echo "⚠️  Le dossier $TARGET_DIR n'est pas vide. Sauvegarde..."
+    mv "$TARGET_DIR" "${TARGET_DIR}_bak_$(date +%s)"
+    mkdir -p "$TARGET_DIR"
 fi
 
-echo "⚠️  COPIE CETTE CLÉ DANS GITHUB (Settings > SSH Keys) :"
-echo "---------------------------------------------------------------"
-cat ~/.ssh/id_rsa.pub
-echo "---------------------------------------------------------------"
-read -p "Une fois la clé ajoutée sur GitHub, appuie sur [Entrée]..." DUMMY
+git clone -b "$GIT_BRANCH" "$GIT_REPO" "$TEMP_DIR"
 
-# 2.3 Clonage
-echo "--- Récupération du Code Source ---"
-read -p "🔹 Voulez-vous cloner le dépôt maintenant ? (o/n) [o] : " DO_CLONE
-DO_CLONE=${DO_CLONE:-o} # Par défaut 'o' si Entrée
+if [ $? -ne 0 ]; then
+    echo "❌ Échec du clonage. Vérifiez l'URL et votre connexion internet."
+    exit 1
+fi
 
-if [[ "$DO_CLONE" =~ ^[oO]$ ]]; then
+# Extraction du sous-dossier Pi vers le répertoire cible
+SOURCE_SUBDIR="$TEMP_DIR/Pi"
 
-    # --- Saisie Repo avec défaut ---
-    read -p "🔹 URL SSH du dépôt [Défaut: $DEFAULT_GIT_REPO] : " GIT_REPO
-    GIT_REPO=${GIT_REPO:-$DEFAULT_GIT_REPO}
-
-    # --- Saisie Branche avec défaut ---
-    read -p "🔹 Quelle branche ? [Défaut: $DEFAULT_GIT_BRANCH] : " GIT_BRANCH
-    GIT_BRANCH=${GIT_BRANCH:-$DEFAULT_GIT_BRANCH}
-
-    echo "   -> Repo : $GIT_REPO"
-    echo "   -> Branche : $GIT_BRANCH"
-
-    # --- Procédure de clonage (via dossier temporaire pour extraire 'Pi') ---
-    TEMP_DIR="/tmp/tibeer_temp_clone"
-
-    # Nettoyage préalable
+if [ -d "$SOURCE_SUBDIR" ]; then
+    echo "📂 Installation des fichiers vers $TARGET_DIR..."
+    cp -a "$SOURCE_SUBDIR/." "$TARGET_DIR/"
     rm -rf "$TEMP_DIR"
-
-    # Backup si dossier cible non vide
-    if [ "$(ls -A $TARGET_DIR 2>/dev/null)" ]; then
-        echo "⚠️  Le dossier $TARGET_DIR n'est pas vide. Sauvegarde..."
-        mv "$TARGET_DIR" "${TARGET_DIR}_bak_$(date +%s)"
-        mkdir -p "$TARGET_DIR"
-    fi
-
-    echo "📥 Clonage temporaire..."
-    git clone -b "$GIT_BRANCH" "$GIT_REPO" "$TEMP_DIR"
-
-    if [ $? -ne 0 ]; then
-        echo "❌ Échec du clonage. Vérifiez vos clés SSH ou l'URL."
-        exit 1
-    fi
-
-    # Extraction du sous-dossier Pi
-    SOURCE_SUBDIR="$TEMP_DIR/Pi"
-
-    if [ -d "$SOURCE_SUBDIR" ]; then
-        echo "📂 Déplacement du contenu de 'Pi' vers $TARGET_DIR..."
-        cp -a "$SOURCE_SUBDIR/." "$TARGET_DIR/"
-        rm -rf "$TEMP_DIR"
-        echo "✅ Fichiers installés."
-        
-        # Rendre le script de mise à jour exécutable
-        chmod +x "$TARGET_DIR/git-update.sh"
-        echo "✅ Script de mise à jour rendu exécutable."
-    else
-        echo "❌ Erreur : Pas de dossier 'Pi' trouvé dans la branche $GIT_BRANCH."
-        rm -rf "$TEMP_DIR"
-        exit 1
-    fi
-
+    chmod +x "$TARGET_DIR/git-update.sh"
+    echo "✅ Fichiers installés."
 else
-    # Cas installation manuelle
-    mkdir -p "$TARGET_DIR"
-    echo ""
-    echo "⚠️  INSTALLATION MANUELLE"
-    echo "👉 Copiez le contenu de votre dossier 'Pi' dans $TARGET_DIR maintenant."
-    read -p "Appuyez sur [Entrée] une fois fait..."
+    echo "❌ Erreur : dossier 'Pi' introuvable dans la branche $GIT_BRANCH."
+    rm -rf "$TEMP_DIR"
+    exit 1
 fi
 
 

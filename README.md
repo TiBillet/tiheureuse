@@ -1,194 +1,237 @@
-🍺 TiBeer - Client Connecté pour Tireuse à boissons
+# 🍺 TiHeure — Tireuse à boissons connectée
 
-TiBeer Client est le logiciel embarqué (basé sur Python) pour Raspberry Pi permettant de transformer une tireuse à boissons standard en une tireuse connectée et intelligente.
+> Transformez n'importe quelle tireuse en un système cashless connecté : badge RFID, comptage de débit en temps réel, interface kiosk sur écran, et administration web complète.
 
-Il gère l'authentification RFID, le contrôle des électrovannes, le comptage de débit en temps réel et l'affichage (mode Kiosk), tout en communiquant via WebSockets avec un serveur central (Django).
+TiHeure est composé de deux parties :
+- **Pi** — le client embarqué sur Raspberry Pi (Python)
+- **Django** — le serveur central (gestion des cartes, des tireuses, des historiques)
 
-🚀 Fonctionnalités
+Projet open source — licence AGPLv3 — fabriqué par la [Coopérative Code Commun](https://codecommun.coop), membre de l'écosystème [TiBillet](https://tibillet.org).
 
-    Authentification RFID : Lecture de badges (Mifare RC522).
-    Contrôle de Vanne : Ouverture/Fermeture via GPIO (Relais) si la carte est autorisée, à du crédit et que le volume restant est suffisant.
-    Débitmétrie : Comptage précis des impulsions pour mesurer le volume servi.
-    Communication Temps Réel : Utilisation de Socket.IO pour synchroniser l'état avec le serveur et mettre à jour le solde de la carte.
-    Affichage Kiosk : Lancement automatique d'un navigateur en plein écran pour l'interface utilisateur.
-    Installation Automatisée : Script Bash complet pour le déploiement.
-    Multi tireuses : l'interface d'admin Django permet de gérer plusieurs tireuses. 
+---
 
-🛠 Matériel et logiciels Requis
+## ✨ Fonctionnalités
 
-    1/ Matériel :
-    Raspberry Pi : (Testé sur Pi 3B+ ) mais un autre Pi peut etre utilisé.
-    Hat de terminaison GPIO : Pour permettre une connexion facile avec borniers aux GPIO.
-    Lecteur RFID : Module RC522 (SPI).
-    Débitmètre : Capteur à effet Hall (3 fils).
-    Électrovanne : 12V ou 24V (pilotée via relais).
-    Relais : Pour l'isolation du circuit de puissance.
-    Écran : HDMI ou tactile pour l'interface visuelle.
-    
-    2/ Logiciel : 
-    Clé SSH publique sur le poste local : Pour se connecter au Pi en SSH (à copier dans Raspberry Pi Imager au moment de la création de l'image)
-    Raspberry Pi Imager : Pour créer l'image sur la SD du Pi .
-    OS de l'image : Bookworm Lite Legacy ( choisir "Raspberry Pi OS (Other) => Raspberry Pi Os ( Legacy,32-bit) Lite")
+| Fonctionnalité | Description |
+|---|---|
+| 🏷️ **Badge RFID** | Lecture de cartes Mifare via RC522 |
+| 🚰 **Contrôle de vanne** | Ouverture/fermeture GPIO selon solde et stock |
+| 📏 **Débitmétrie** | Comptage d'impulsions Hall, calibration depuis l'admin |
+| 📡 **Temps réel** | Synchronisation via WebSocket (Django Channels) |
+| 🖥️ **Kiosk** | Chromium plein écran, jauge de fût, grille de prix |
+| 🔧 **Maintenance** | Cartes dédiées pour le rinçage, historique de nettoyage |
+| 📊 **Admin** | Interface Django Unfold : cartes, fûts, historiques, exports CSV |
+| 🍻 **Multi-tireuses** | Gestion de plusieurs tireuses indépendantes |
 
+---
 
-📂 Structure du Projet
+## 🛠️ Matériel requis
 
-Le code est modulaire pour faciliter la maintenance :
+### Électronique
 
-home/sysop/Pi
+| Composant | Détail |
+|---|---|
+| Raspberry Pi | Testé sur Pi 3B+ (tout modèle avec GPIO) |
+| Hat GPIO | Bornier pour connexions sans soudure |
+| Lecteur RFID | Module RC522 (SPI) |
+| Débitmètre | Capteur à effet Hall, 3 fils (ex : YF-S201, FS300A) |
+| Électrovanne | 12V ou 24V pilotée via relais |
+| Relais | Isolation circuit de puissance |
+| Écran | HDMI ou tactile |
 
-`├── main.py                # Point d'entrée principal (Orchestrateur)`
+### Logiciel (poste de préparation)
 
-├── controllers/
+- [Raspberry Pi Imager](https://www.raspberrypi.com/software/) pour flasher la carte SD
+- Votre clé SSH publique (à injecter via Imager pour l'accès SSH au Pi)
 
-     tibeer_controller.py   # Gestion de la detection des events carte (presence,retrait ...)
-    
-├── hardware/
+---
 
-     rfid_reader.py         # Gestion du lecteur RC522
+## 🔌 Câblage GPIO (BCM, valeurs par défaut)
 
-     valve.py               # Classe de gestion de l'électrovanne (sécurité intégrée)
+| Composant | Pin BCM | Rôle |
+|---|:---:|---|
+| Électrovanne | GPIO 18 | Commande du relais |
+| Débitmètre | GPIO 23 | Entrée impulsions |
+| RFID SDA | GPIO 8 (CE0) | SPI Chip Select |
+| RFID SCK | GPIO 11 | SPI Clock |
+| RFID MOSI | GPIO 10 | SPI MOSI |
+| RFID MISO | GPIO 9 | SPI MISO |
+| RFID RST | GPIO 25 | Reset RC522 |
 
-     flow_meter.py          # Gestion des interruptions du débitmètre
+> Toutes ces valeurs sont modifiables dans `/home/sysop/tibeer/.env` après installation.
 
-├── network/
+![Schéma de câblage](Pi/asset/Cnx%20Pi.png)
 
-     backend_client.py      # Gestion de la communication avec le backend
+---
 
-├── ui/
+## ⚙️ Installation du Pi
 
-     ui_server.py           # Gestion de l'affichage sur l'ecran
+### 1. Préparer la carte SD
 
-├── utils/
+Dans **Raspberry Pi Imager** :
+- OS : `Raspberry Pi OS (Other)` → `Raspberry Pi OS (Legacy, 32-bit) Lite`
+- Activer SSH, injecter votre clé publique
+- Nom d'utilisateur : **`sysop`**
 
-     exceptions.py          # Gestion des exceptions
+### 2. Lancer l'installation
 
-     loger.py               # Gestion des logs
-    
-     exceptions.py          # Gestion des exceptions
-    
-     serial_tools.py        # Pour utilisation du port série (si utilisée VMA405)
-    
-`├── install.sh              # Script d'installation automatique`
+Connectez-vous en SSH au Pi, puis exécutez cette commande unique :
 
-`├── requirements.txt        # Dépendances Python`
+```bash
+wget https://raw.githubusercontent.com/TiBillet/tiheureuse/master/Pi/install.sh && chmod +x install.sh && ./install.sh
+```
 
+> Le dépôt est public — **aucune clé SSH GitHub n'est requise**.
 
-    Note : Le dépôt GitHub contient un dossier Pi.
-    Le script d'installation se charge d'extraire ce contenu vers /home/sysop/tibeer sur la machine cible.
+### 3. Répondre aux questions du script
 
-⚙️ Installation
+Le script est interactif et ne demande que l'essentiel :
 
-### 1. Préparation du Raspberry Pi
+```
+🔹 Adresse du serveur Django   →  http://192.168.1.10:8000
+🔹 UUID de la tireuse          →  (visible dans l'admin Django)
+🔹 Branche Git                 →  master  (Entrée pour valider)
+🔹 Clé API partagée            →  (AGENT_SHARED_KEY dans settings.py)
+```
 
-Installez Raspberry Pi OS Lite (Legacy) via Raspberry Pi Imager en activant SSH et en copiant votre clé publique.
-et en Configurant l'utilisateur par défaut (sysop).
+### 4. Ce que le script fait automatiquement
 
-### 2. Lancement du script d'installation
+- Mise à jour système et installation des dépendances
+- Clonage du dépôt via HTTPS
+- Création de l'environnement virtuel Python
+- Génération du fichier `.env`
+- Configuration GPIO, affichage kiosk (Openbox + Chromium)
+- Activation des services systemd `tibeer.service` et `kiosk.service`
+- Mise à jour automatique du code à chaque démarrage (`git pull`)
+
+---
+
+## 🖥️ Installation du serveur Django
+
+### Prérequis
 
-Connectez-vous en SSH au Raspberry Pi :
+- Python 3.9+
+- Les dépendances listées dans `vanneweb/settings.py`
+
+### Lancer le serveur
 
-sur votre poste en local recupérez le fichier install.sh puis copiez le sur le Pi
+```bash
+# Cloner le dépôt
+git clone https://github.com/TiBillet/tiheureuse.git
+cd tiheureuse
 
-ou plus simple créez le directement sur le Pi :
+# Environnement virtuel
+python3 -m venv venv && source venv/bin/activate
+pip install -r requirements.txt   # ou pip install -e .
 
-Connecté en SSH sur le Pi :
+# Migrations
+python manage.py migrate
 
-```nano install.sh```
+# Créer un superutilisateur
+python manage.py createsuperuser
 
-copiez le contenu du fichier install.sh depuis github
+# Lancer avec Daphne (WebSocket requis)
+daphne -b 0.0.0.0 -p 8000 vanneweb.asgi:application
+```
 
-collez le contenu puis CTRL+X et Y
+> L'interface d'administration est accessible sur `http://<ip>:8000/admin/`
 
+---
 
-#### Rendre le script exécutable
+## 📝 Configuration `.env` (Pi)
 
-```chmod +x install.sh```
+Généré automatiquement par le script, situé dans `/home/sysop/tibeer/.env` :
 
-#### Lancer l'installation ( SANS sudo ! )
-`./install.sh`
-`
+```env
+TIREUSE_BEC=<uuid-de-la-tireuse>
+API_URL=http://192.168.1.10:8000
+BACKEND_API_KEY=votre_cle_partagee
 
-### 3. Durant l'installation
+# GPIO (BCM)
+GPIO_VANNE=18
+GPIO_FLOW_SENSOR=23
+RC522_RST_PIN=22
+RC522_SDA_PIN=24
 
-Le script interactif vous demandera :
+# Git (mise à jour auto au démarrage)
+GIT_REPO=https://github.com/TiBillet/tiheureuse.git
+GIT_BRANCH=master
+```
 
-    L'adresse du serveur Django (Backend).
-    L'identifiant de la tireuse (ex: tireuse_gauche).
-    L'URL du dépôt Git et la branche à cloner (master).
-    De confirmer la création des clés SSH pour le déploiement sur GitHub.
+> L'UUID de la tireuse se trouve dans l'admin Django : **Exploitation → Tireuses**.
 
-Le script s'occupe automatiquement :
+---
 
-    Des mises à jour système (apt update/upgrade).
-    De l'installation des dépendances système (python3-venv, spi-tools, etc.).
-    De la création de l'environnement virtuel Python.
-    De la configuration des droits GPIO.
-    De l'installation et l'activation des services systemd (tibeer.service et kiosk.service).
+## 📂 Structure du projet
 
-🔌 Câblage (GPIO par défaut)
+```
+tiheureuse/
+├── Pi/                         # Code embarqué Raspberry Pi
+│   ├── main.py                 # Point d'entrée (orchestrateur)
+│   ├── controllers/
+│   │   └── tibeer_controller.py   # Détection des événements carte
+│   ├── hardware/
+│   │   ├── rfid_reader.py         # Lecteur RC522
+│   │   ├── valve.py               # Contrôle électrovanne
+│   │   └── flow_meter.py          # Débitmètre (impulsions Hall)
+│   ├── network/
+│   │   └── backend_client.py      # Communication avec Django
+│   ├── install.sh                 # Script d'installation automatique
+│   └── git-update.sh              # Mise à jour au démarrage
+│
+├── controlvanne/               # Application Django principale
+│   ├── models.py               # Card, TireuseBec, Fut, RfidSession…
+│   ├── views.py                # API pour le Pi (authorize, events)
+│   ├── consumers.py            # WebSocket (Django Channels)
+│   ├── admin.py                # Interface d'administration (Unfold)
+│   └── calibration_views.py   # Wizard de calibration débitmètre
+│
+├── templates/
+│   ├── controlvanne/           # Interface kiosk (panel Bootstrap)
+│   └── calibration/            # Wizard HTMX de calibration
+│
+└── vanneweb/                   # Configuration Django (settings, urls, asgi)
+```
 
-Les broches peuvent être modifiées dans le fichier .env généré,
-mais voici la configuration standard (BCM) :
+---
 
-|Composant 	  |Pin RPi (BCM)     |    Description     
-| :--------------- |:---------------:|:------------------:|
-|Vanne 	|GPIO 18 	| Contrôle du Relais |
-|Débitmètre 	|GPIO 23 	|  Entrée impulsion  |
-|RFID SDA 	|GPIO 8 (CE0) 	|  SPI Chip Select   |
-|RFID SCK 	|GPIO 11 	|     SPI Clock      |
-|RFID MOSI 	|GPIO 10 	|      SPI MOSI      |
-|RFID MISO 	|GPIO 9 	|      SPI MISO      |
-|RFID RST 	|GPIO 25 	|   Reset du RC522   |
+## 🖥️ Commandes utiles
 
-📝 Configuration (.env)
+### Sur le Pi
 
-Une fois installé, la configuration se trouve dans /home/sysop/tibeer/.env.
-Exemple :
+```bash
+# Voir les logs en temps réel
+sudo journalctl -u tibeer -f
 
-DJANGO_SERVER=http://192.168.1.50:8000
+# Redémarrer les services
+sudo systemctl restart tibeer.service kiosk.service
 
-TIREUSE_BEC=blonde_01
+# Arrêter les services
+sudo systemctl stop tibeer.service kiosk.service
 
-`# GPIO Settings
+# Accéder à l'environnement virtuel
+source /home/sysop/tibeer/.venv/bin/activate
+```
 
-PIN_VANNE=18
+### Sur le serveur Django
 
-PIN_COMPTEUR=23
+```bash
+# Lancer le serveur (développement)
+daphne -b 0.0.0.0 -p 8000 vanneweb.asgi:application
 
-PIN_RFID_RST=25
+# Appliquer les migrations
+python manage.py migrate
 
+# Reconstruire les fichiers statiques
+python manage.py collectstatic --no-input
+```
 
-Coté Admin de Django :
+---
 
-il faut que la tireuse(TIREUSE_BEC) soit créée ( blonde_01 dans l'exemple)
+## 🤝 Contribution
 
-### 🖥 Commandes Utiles
+Projet membre de l'écosystème **TiBillet** (Lespass, LaBoutik, Fedow).
+Licence **AGPLv3** — contributions bienvenues via pull request.
 
-Sur le Pi :
-
-Pour gérer le service une fois installé :
-
-#### Entrer dans l'environnement virtuel
-
-`source tibeer/venv/bin/activate`
-
-#### Voir les logs en temps réel
-`sudo journalctl -u tibeer -f
-`
-#### Redémarrer le service
-`sudo systemctl restart kiosk.service tibeer.service`
-
-#### Arrêter le service
-`sudo systemctl stop kiosk.service tibeer.service`
-
-Sur le serveur Django :
-#### Lancer le serveur 
-`uvicorn vanneweb.asgi:application --host 0.0.0.0 --port 8000`
-
-### TODO 
-detailler la partie Django
-
-### 🛠 Hardware connexion Pi :
-
-![Cnx Pi.png](Pi/asset/Cnx%20Pi.png)
+- Issues : [github.com/TiBillet/tiheureuse/issues](https://github.com/TiBillet/tiheureuse/issues)
+- Coopérative : [codecommun.coop](https://codecommun.coop)
