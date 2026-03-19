@@ -15,6 +15,7 @@ class RFIDReader:
         self.reader_type = os.getenv("RFID_TYPE", "RC522").upper()
         self.reader = None
         self.serial = None
+        self.acr_connection = None
 
         logger.info(f"Initialisation du lecteur RFID type: {self.reader_type}")
 
@@ -22,9 +23,11 @@ class RFIDReader:
             self._init_rc522()
         elif self.reader_type == "VMA405":
             self._init_vma405()
+        elif self.reader_type == "ACR122U":
+            self._init_acr122u()
         else:
             logger.error(
-                f"Type RFID inconnu: {self.reader_type}. Utilisez RC522 ou VMA405."
+                f"Type RFID inconnu: {self.reader_type}. Utilisez RC522, VMA405 ou ACR122U."
             )
 
     def _init_rc522(self):
@@ -39,7 +42,7 @@ class RFIDReader:
 
     def _init_vma405(self):
         """Initialise le lecteur Série VMA405."""
-        port = os.getenv("RFID_SERIAL_PORT", "/dev/ttyS0")
+        port = os.getenv("RFID_SERIAL_PORT", "/dev/ttyUSB0")
         baud = int(os.getenv("RFID_BAUDRATE", 9600))
         try:
             self.serial = SerialReader(port, baud)
@@ -50,12 +53,40 @@ class RFIDReader:
                 f"Impossible d'initialiser le VMA405 sur {port} : {e}"
             ) from e
 
+    def _init_acr122u(self):
+        """Initialise le lecteur USB ACR122U via PC/SC (pyscard).
+        Nécessite : pcscd actif + pyscard installé.
+        """
+        try:
+            from smartcard.System import readers as pcsc_readers
+        except ImportError:
+            raise RFIDInitError(
+                "Bibliothèque pyscard manquante. Installez : pip install pyscard"
+            )
+        try:
+            lecteurs = pcsc_readers()
+            # On cherche un lecteur dont le nom contient ACR122
+            acr = [r for r in lecteurs if "ACR122" in str(r)]
+            if not acr:
+                raise RFIDInitError(
+                    "ACR122U non trouvé. Vérifiez que pcscd est actif et le lecteur branché."
+                )
+            self.acr_connection = acr[0]
+            logger.info(f"Lecteur ACR122U prêt : {acr[0]}")
+        except RFIDInitError:
+            raise
+        except Exception as e:
+            logger.error(f"Erreur init ACR122U: {e}")
+            raise RFIDInitError(f"Impossible d'initialiser l'ACR122U : {e}") from e
+
     def read_uid(self):
         """Méthode unifiée pour lire un tag selon le type configuré."""
         if self.reader_type == "RC522":
             return self._read_rc522()
         elif self.reader_type == "VMA405":
             return self._read_vma405()
+        elif self.reader_type == "ACR122U":
+            return self._read_acr122u()
         return None
 
     def _read_rc522(self):
@@ -87,6 +118,26 @@ class RFIDReader:
             logger.error(f"Erreur lecture VMA405: {e}")
             raise RFIDReadError(f"Erreur lecture VMA405 : {e}") from e
 
+    def _read_acr122u(self):
+        """Lecture spécifique ACR122U via APDU PC/SC.
+        Commande FF CA 00 00 00 = GET UID (standard ISO 14443).
+        Réponse : octets UID + SW1=0x90 + SW2=0x00 si succès.
+        """
+        # Commande APDU standard pour lire l'UID d'un tag NFC
+        GET_UID = [0xFF, 0xCA, 0x00, 0x00, 0x00]
+        try:
+            conn = self.acr_connection.createConnection()
+            conn.connect()
+            data, sw1, sw2 = conn.transmit(GET_UID)
+            conn.disconnect()
+            # sw1=0x90 = succès PC/SC
+            if sw1 == 0x90 and data:
+                return "".join([f"{b:02X}" for b in data])
+        except Exception:
+            # Pas de carte présente ou badge retiré trop vite — silence voulu
+            pass
+        return None
+
     def _uid_to_hex(self, uid):
         """
         Convertit la liste d'entiers [116, 30, 204, 42, 140] en String '741ECC2A'.
@@ -108,4 +159,5 @@ class RFIDReader:
         if self.reader_type == "VMA405" and self.serial:
             self.serial.close()
         # MFRC522 gère son propre SPI, pas de cleanup critique nécessaire ici
+        # ACR122U : pas de ressource persistante à fermer (connexion créée à chaque lecture)
         logger.info("Lecteur RFID nettoyé")

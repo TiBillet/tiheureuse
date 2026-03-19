@@ -64,6 +64,24 @@ GIT_BRANCH=${GIT_BRANCH:-$DEFAULT_GIT_BRANCH}
 GIT_REPO="$DEFAULT_GIT_REPO"
 
 echo ""
+echo "🔹 Type de lecteur RFID :"
+echo "   1) RC522   (SPI — défaut, le plus courant)"
+echo "   2) VMA405  (UART/Série USB)"
+echo "   3) ACR122U (USB PC/SC)"
+read -p "   Choix [1/2/3, Défaut: 1] : " RFID_CHOICE
+if [ "$RFID_CHOICE" = "2" ]; then
+    RFID_TYPE="VMA405"
+    read -p "🔹 Port série VMA405 [Défaut: /dev/ttyUSB0] : " RFID_SERIAL_PORT
+    RFID_SERIAL_PORT=${RFID_SERIAL_PORT:-/dev/ttyUSB0}
+    read -p "🔹 Baudrate VMA405 [Défaut: 9600] : " RFID_BAUDRATE
+    RFID_BAUDRATE=${RFID_BAUDRATE:-9600}
+elif [ "$RFID_CHOICE" = "3" ]; then
+    RFID_TYPE="ACR122U"
+else
+    RFID_TYPE="RC522"
+fi
+
+echo ""
 echo "--- 📥 Clonage du dépôt (HTTPS, sans clé SSH) ---"
 echo "   Repo   : $GIT_REPO"
 echo "   Branche: $GIT_BRANCH"
@@ -152,7 +170,7 @@ echo "Installation des dépendances Python..."
 source "$VENV_DIR/bin/activate"
 pip install --upgrade pip
 # LES LIBS DEMANDÉES EXPLICITEMENT :
-pip install pyserial flask requests pigpio mfrc522 RPi.GPIO spidev python-dotenv channels daphne
+pip install pyserial flask requests pigpio mfrc522 RPi.GPIO spidev python-dotenv channels daphne pyscard
 
 # Si requirements.txt existe, on l'installe aussi pour être sûr
 if [ -f "requirements.txt" ]; then
@@ -185,15 +203,38 @@ BACKEND_HOST=$BACKEND_HOST_PARSED
 BACKEND_PORT=$BACKEND_PORT_PARSED
 BACKEND_API_KEY=$BACKEND_API_KEY
 DEBUG=False
+# Lecteur RFID
+RFID_TYPE=$RFID_TYPE
 # GPIO Settings
 GPIO_VANNE=18
+VALVE_ACTIVE_HIGH=False
 GPIO_FLOW_SENSOR=23
-RC522_RST_PIN=22
-RC522_SDA_PIN=24
+FLOW_CALIBRATION_FACTOR=6.5
+# Réseau
+NETWORK_TIMEOUT=5.0
+MAX_RETRIES=3
+# Systemd
+SYSTEMD_NOTIFY=True
 # Git Settings (pour mise à jour auto au démarrage)
 GIT_REPO=${GIT_REPO:-$DEFAULT_GIT_REPO}
 GIT_BRANCH=${GIT_BRANCH:-$DEFAULT_GIT_BRANCH}
 EOF
+
+# Ajout des paramètres série si VMA405
+if [ "$RFID_TYPE" = "VMA405" ]; then
+cat << EOF >> "$TARGET_DIR/.env"
+# VMA405 Série
+RFID_SERIAL_PORT=$RFID_SERIAL_PORT
+RFID_BAUDRATE=$RFID_BAUDRATE
+EOF
+fi
+
+# Installation pcscd si ACR122U (démon PC/SC requis pour pyscard)
+if [ "$RFID_TYPE" = "ACR122U" ]; then
+    echo "   📦 Installation pcscd (requis pour ACR122U)..."
+    sudo apt-get install -y --no-install-recommends pcscd libpcsclite-dev
+fi
+
 chmod 600 "$TARGET_DIR/.env"
 
 # ==========================================
@@ -287,6 +328,12 @@ echo "[8/10] 🔧 Création des Services..."
 # Pigpiod
 sudo systemctl enable pigpiod
 sudo systemctl start pigpiod
+
+# Pcscd (requis pour ACR122U)
+if [ "$RFID_TYPE" = "ACR122U" ]; then
+    sudo systemctl enable pcscd
+    sudo systemctl start pcscd
+fi
 
 # Service Kiosk
 cat << EOF | sudo tee /etc/systemd/system/kiosk.service
