@@ -7,6 +7,7 @@ load_dotenv()
 
 BACKEND_API_KEY = os.getenv("BACKEND_API_KEY", "changeme")
 TIREUSE_BEC = os.getenv("TIREUSE_BEC", "CHANGER_CI")
+NOM_TIREUSE = os.getenv("NOM_TIREUSE", "Tireuse")
 # --- Chemins et répertoires ---
 BASE_DIR = Path(__file__).resolve().parent.parent
 LOG_DIR = Path("~/tibeer/logs")

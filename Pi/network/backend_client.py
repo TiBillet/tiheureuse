@@ -1,6 +1,7 @@
 import requests
 import json
-from config.settings import BACKEND_HOST, BACKEND_PORT, BACKEND_API_KEY, TIREUSE_BEC
+import socket
+from config.settings import BACKEND_HOST, BACKEND_PORT, BACKEND_API_KEY, NOM_TIREUSE, TIREUSE_BEC
 from utils.logger import logger
 from utils.exceptions import BackendError
 
@@ -17,6 +18,35 @@ class BackendClient:
         }
         self.base_url = API_URL.rstrip("/") + "/api/rfid"
         self.tireuse_id = tireuse_id
+
+    def register(self) -> dict:
+        """
+        Auto-enregistre cette tireuse sur Django au démarrage.
+        Django crée la TireuseBec si elle n'existe pas (enabled=False).
+        Nécessite que 'allow_self_register' soit activé dans l'admin Django.
+        Silencieux si le serveur refuse (mode désactivé) : on continue quand même.
+        """
+        url = f"{self.base_url}/register/"
+        payload = {
+            "uuid": self.tireuse_id,
+            "nom_tireuse": NOM_TIREUSE,
+            "hostname": socket.gethostname(),
+        }
+        try:
+            r = requests.post(url, json=payload, headers=self.headers, timeout=5.0)
+            if r.status_code == 200:
+                return r.json()
+            elif r.status_code == 403:
+                # Mode désactivé côté Django — pas bloquant
+                logger.info("Auto-enregistrement désactivé sur le serveur (normal en prod).")
+                return {"error": "disabled"}
+            else:
+                logger.warning(f"Réponse inattendue lors du register : {r.status_code}")
+                return {"error": f"HTTP {r.status_code}"}
+        except Exception as e:
+            # Erreur réseau non bloquante — le Pi peut fonctionner s'il est déjà connu
+            logger.warning(f"Auto-enregistrement impossible (réseau?) : {e}")
+            return {"error": str(e)}
 
     def authorize(self, uid: str) -> dict:
         """

@@ -6,7 +6,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.conf import settings
 from django.utils import timezone
 from asgiref.sync import async_to_sync
-from .models import Card, CarteMaintenance, RfidSession, TireuseBec
+from .models import Card, CarteMaintenance, Configuration, RfidSession, TireuseBec
 from decimal import Decimal, ROUND_HALF_UP
 from django.db import transaction
 from django.db.models import F
@@ -669,3 +669,77 @@ def api_rfid_event(request):
         response_data["message"] = "Solde epuise - Fermeture vanne requise"
 
     return JsonResponse(response_data)
+
+
+@csrf_exempt
+def api_rfid_register(request):
+    """
+    Auto-enregistrement d'un Pi dans la base Django.
+    Le Pi envoie son UUID (dérivé du MAC), son nom et son hostname.
+    Django crée la TireuseBec si elle n'existe pas encore (enabled=False).
+
+    Sécurité :
+    - Clé API partagée obligatoire (header X-API-Key)
+    - Enregistrement autorisé uniquement si Configuration.allow_self_register=True
+    """
+    if request.method != "POST":
+        return JsonResponse({"error": "POST requis"}, status=405)
+
+    # 1. Vérification de la clé API partagée
+    if not _check_key(request):
+        return JsonResponse({"error": "Clé API invalide"}, status=401)
+
+    # 2. Vérification du mode d'enregistrement ouvert
+    config = Configuration.get()
+    if not config.allow_self_register:
+        return JsonResponse(
+            {
+                "error": (
+                    "Auto-enregistrement désactivé. "
+                    "Activez 'Autoriser l'auto-enregistrement des Pi' "
+                    "dans Configuration serveur de l'admin Django."
+                )
+            },
+            status=403,
+        )
+
+    # 3. Parsing du body JSON
+    try:
+        body = json.loads(request.body)
+    except (json.JSONDecodeError, ValueError):
+        return JsonResponse({"error": "Corps JSON invalide"}, status=400)
+
+    uuid_str = body.get("uuid")
+    nom_tireuse = (body.get("nom_tireuse") or "Nouvelle tireuse").strip()[:50]
+    hostname = (body.get("hostname") or "").strip()[:100]
+
+    if not uuid_str:
+        return JsonResponse({"error": "Champ 'uuid' requis"}, status=400)
+
+    # 4. Validation du format UUID
+    try:
+        from uuid import UUID as UUIDType
+        uuid_obj = UUIDType(str(uuid_str))
+    except (ValueError, AttributeError):
+        return JsonResponse({"error": "Format UUID invalide"}, status=400)
+
+    # 5. Création de la tireuse si elle n'existe pas encore
+    note = f"Auto-enregistrée depuis {hostname}" if hostname else "Auto-enregistrée"
+    tireuse, created = TireuseBec.objects.get_or_create(
+        uuid=uuid_obj,
+        defaults={
+            "nom_tireuse": nom_tireuse,
+            # Désactivée par défaut : l'admin doit assigner un fût et un débitmètre
+            "enabled": False,
+            "notes": note,
+        },
+    )
+
+    return JsonResponse(
+        {
+            "status": "created" if created else "already_exists",
+            "uuid": str(tireuse.uuid),
+            "nom_tireuse": tireuse.nom_tireuse,
+            "enabled": tireuse.enabled,
+        }
+    )

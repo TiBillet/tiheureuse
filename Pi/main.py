@@ -14,6 +14,7 @@ load_dotenv()
 from utils.logger import logger
 from config.settings import SYSTEMD_NOTIFY
 from controllers.tibeer_controller import TibeerController
+from network.backend_client import BackendClient
 
 # --- Debug Permissions (Utile pour SystemD) ---
 def debug_environment():
@@ -54,10 +55,22 @@ def main():
         except ImportError:
             logger.warning("Module python-systemd manquant, notification ignorée.")
 
+    # Tentative d'auto-enregistrement auprès de Django
+    # Silencieux si le serveur a désactivé le mode (cas normal en production)
+    try:
+        client = BackendClient()
+        resultat = client.register()
+        if resultat.get("status") == "created":
+            logger.info(f"Tireuse auto-enregistrée sur Django.")
+        elif resultat.get("status") == "already_exists":
+            logger.info(f"Tireuse déjà connue de Django.")
+    except Exception as e:
+        logger.warning(f"Auto-enregistrement non critique : {e}")
+
     try:
         # Création et lancement du contrôleur
         controller = TibeerController()
-        controller.run()  
+        controller.run()
 
     except KeyboardInterrupt:
         logger.info("Arrêt signal (CTRL+C).")

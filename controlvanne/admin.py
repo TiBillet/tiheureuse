@@ -8,7 +8,7 @@ from django.utils.html import format_html
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
 from unfold.admin import ModelAdmin, TabularInline
-from .models import (Card, CarteMaintenance, Debimetre, Fut, HistoriqueCarte,
+from .models import (Card, CarteMaintenance, Configuration, Debimetre, Fut, HistoriqueCarte,
                      HistoriqueFut, HistoriqueMaintenance, HistoriqueTireuse,
                      RfidSession, SessionCalibration, TireuseBec)
 from .forms import TireuseBecForm
@@ -624,3 +624,27 @@ class SessionCalibrationAdmin(ModelAdmin):
     def duree_s_cal(self, obj):
         d = obj.duration_seconds
         return int(d) if d is not None else "—"
+
+
+# ---------------------------------------------------------------------------
+# Configuration serveur (singleton)
+# ---------------------------------------------------------------------------
+@admin.register(Configuration)
+class ConfigurationAdmin(ModelAdmin):
+    """
+    Singleton : un seul objet possible.
+    La liste redirige directement vers le formulaire de cet objet.
+    """
+
+    def has_add_permission(self, request):
+        # On bloque l'ajout si l'objet existe déjà
+        return not Configuration.objects.exists()
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+    def changelist_view(self, request, extra_context=None):
+        # Redirige la vue liste directement vers le formulaire unique
+        from django.shortcuts import redirect
+        obj = Configuration.get()
+        return redirect(f"../{obj.pk}/change/")

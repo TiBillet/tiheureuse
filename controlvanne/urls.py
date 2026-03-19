@@ -7,6 +7,7 @@ urlpatterns = [
     path("api/rfid/event/", views.api_rfid_event, name="api_rfid_event"),
     path("api/rfid/authorize", views.api_rfid_authorize, name="api_rfid_authorize"),
     path("api/rfid/ping", views.ping, name="api_rfid_ping"),
+    path("api/rfid/register/", views.api_rfid_register, name="api_rfid_register"),
     path("", views.panel_multi, name="panel"),
 
     # Calibration débitmètre

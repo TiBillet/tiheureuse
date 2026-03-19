@@ -56,8 +56,18 @@ DJANGO_SERVER=${DJANGO_SERVER:-$DEFAULT_DJANGO_SERVER}
 DJANGO_SERVER=${DJANGO_SERVER%/}
 echo "   -> Utilisation de : $DJANGO_SERVER"
 
-read -p "🔹 Nom de la tireuse (UUID) [Défaut: $DEFAULT_TIREUSE_ID] : " TIREUSE_BEC
-TIREUSE_BEC=${TIREUSE_BEC:-$DEFAULT_TIREUSE_ID}
+read -p "🔹 Nom de la tireuse (ex: Bière Blonde, Bar principal) : " NOM_TIREUSE
+while [ -z "$NOM_TIREUSE" ]; do
+    echo "   ⚠️  Le nom ne peut pas être vide."
+    read -p "🔹 Nom de la tireuse : " NOM_TIREUSE
+done
+
+# Génération de l'UUID depuis l'adresse MAC (stable et reproductible à chaque réinstall)
+MAC=$(cat /sys/class/net/eth0/address 2>/dev/null \
+    || cat /sys/class/net/wlan0/address 2>/dev/null \
+    || echo "00:00:00:00:00:00")
+TIREUSE_BEC=$(python3 -c "import uuid; print(uuid.uuid5(uuid.NAMESPACE_DNS, '${MAC}'))")
+echo "   -> UUID généré depuis MAC ($MAC) : $TIREUSE_BEC"
 
 read -p "🔹 Branche Git [Défaut: $DEFAULT_GIT_BRANCH] : " GIT_BRANCH
 GIT_BRANCH=${GIT_BRANCH:-$DEFAULT_GIT_BRANCH}
@@ -204,6 +214,7 @@ done
 cat << EOF > "$TARGET_DIR/.env"
 # Généré par le script d'installation
 TIREUSE_BEC=$TIREUSE_BEC
+NOM_TIREUSE=$NOM_TIREUSE
 API_URL=$DJANGO_SERVER
 BACKEND_HOST=$BACKEND_HOST_PARSED
 BACKEND_PORT=$BACKEND_PORT_PARSED

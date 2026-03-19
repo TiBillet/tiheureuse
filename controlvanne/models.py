@@ -380,3 +380,36 @@ class HistoriqueCarte(RfidSession):
         proxy = True
         verbose_name = "Historique carte"
         verbose_name_plural = "Historique cartes"
+
+
+class Configuration(models.Model):
+    """
+    Singleton de configuration globale du serveur.
+    Un seul objet possible (pk=1 forcé dans save()).
+    """
+    allow_self_register = models.BooleanField(
+        "Autoriser l'auto-enregistrement des Pi",
+        default=False,
+        help_text=(
+            "Activez temporairement pour qu'un nouveau Pi puisse s'enregistrer "
+            "automatiquement au démarrage. Désactivez après l'enregistrement."
+        ),
+    )
+
+    class Meta:
+        verbose_name = "Configuration serveur"
+        verbose_name_plural = "Configuration serveur"
+
+    def save(self, *args, **kwargs):
+        # Singleton : on force toujours pk=1 pour qu'il n'existe qu'un seul objet
+        self.pk = 1
+        super().save(*args, **kwargs)
+
+    @classmethod
+    def get(cls):
+        """Retourne l'objet de configuration (le crée avec les defaults si absent)."""
+        obj, _ = cls.objects.get_or_create(pk=1)
+        return obj
+
+    def __str__(self):
+        return "Configuration serveur"

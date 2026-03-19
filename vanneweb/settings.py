@@ -207,6 +207,11 @@ UNFOLD = {
                         "icon": "developer_mode",
                         "link": reverse_lazy("admin:controlvanne_rfidsession_changelist"),
                     },
+                    {
+                        "title": "Configuration serveur",
+                        "icon": "settings",
+                        "link": reverse_lazy("admin:controlvanne_configuration_changelist"),
+                    },
                 ],
             },
         ],
