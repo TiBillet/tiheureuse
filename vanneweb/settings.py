@@ -198,6 +198,11 @@ UNFOLD = {
                         "link": reverse_lazy("admin:controlvanne_debimetre_changelist"),
                     },
                     {
+                        "title": "Calibrations",
+                        "icon": "straighten",
+                        "link": reverse_lazy("admin:controlvanne_sessioncalibration_changelist"),
+                    },
+                    {
                         "title": "Sessions brutes",
                         "icon": "developer_mode",
                         "link": reverse_lazy("admin:controlvanne_rfidsession_changelist"),

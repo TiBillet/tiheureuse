@@ -294,6 +294,13 @@ class RfidSession(models.Model):
         max_digits=10, decimal_places=2, default=Decimal("0.00")
     )
     is_maintenance = models.BooleanField("Session maintenance", default=False)
+    is_calibration = models.BooleanField("Session calibration", default=False)
+    volume_reel_ml = models.DecimalField(
+        "Volume réel (ml)",
+        max_digits=10, decimal_places=2,
+        null=True, blank=True,
+        help_text="Volume mesuré physiquement dans un verre gradué",
+    )
     carte_maintenance = models.ForeignKey(
         "CarteMaintenance", null=True, blank=True,
         on_delete=models.SET_NULL, related_name="sessions",
@@ -341,6 +348,14 @@ class RfidSession(models.Model):
     def __str__(self):
         status = "OPEN" if not self.ended_at else "CLOSED"
         return f"{self.tireuse_bec.nom_tireuse}:{self.uid} [{status}] {self.started_at:%Y-%m-%d %H:%M:%S}"
+
+
+class SessionCalibration(RfidSession):
+    """Vue proxy de RfidSession filtrée sur les sessions de calibration débitmètre."""
+    class Meta:
+        proxy = True
+        verbose_name = "Session calibration"
+        verbose_name_plural = "Sessions calibration"
 
 
 class HistoriqueMaintenance(RfidSession):

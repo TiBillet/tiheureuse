@@ -336,6 +336,9 @@
       }
 
       targets.forEach(c => {
+        // Le serveur envoie un payload normal (pas maintenance) → la tireuse est en service
+        c.isMaintenance = false;
+
         // Mise à jour jauge (tous les messages)
         if (payload.reservoir_ml !== undefined) {
           const maxMl = payload.reservoir_max_ml || c.maxMl;

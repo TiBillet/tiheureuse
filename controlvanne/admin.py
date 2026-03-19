@@ -10,7 +10,7 @@ from asgiref.sync import async_to_sync
 from unfold.admin import ModelAdmin, TabularInline
 from .models import (Card, CarteMaintenance, Debimetre, Fut, HistoriqueCarte,
                      HistoriqueFut, HistoriqueMaintenance, HistoriqueTireuse,
-                     RfidSession, TireuseBec)
+                     RfidSession, SessionCalibration, TireuseBec)
 from .forms import TireuseBecForm
 
 
@@ -145,7 +145,7 @@ class HistoriqueFutAdmin(ModelAdmin):
 class TireuseBecAdmin(ModelAdmin):
     inlines = [HistoriqueFutInline]
     form = TireuseBecForm
-    actions = ["push_kiosk_url", "push_reload", "push_refresh"]
+    actions = ["push_kiosk_url", "push_reload", "push_refresh", "calibrer_debimetre"]
     list_display = (
         "name_with_uuid",
         "fut_actif",
@@ -239,6 +239,24 @@ class TireuseBecAdmin(ModelAdmin):
     #     self.message_user(request, f"Nouvelle URL envoyée à {n} kiosque(s) via WebSocket.")
     #
     # push_kiosk_url.short_description = "Envoyer la bonne URL au kiosque (WebSocket)"
+
+    def calibrer_debimetre(self, request, queryset):
+        """Redirige vers le wizard de calibration pour la tireuse sélectionnée."""
+        from django.urls import reverse
+        from django.http import HttpResponseRedirect
+        if queryset.count() != 1:
+            self.message_user(
+                request,
+                "Sélectionnez une seule tireuse pour lancer la calibration.",
+                messages.WARNING,
+            )
+            return
+        tireuse = queryset.first()
+        return HttpResponseRedirect(
+            reverse("calibration_page", kwargs={"uuid": tireuse.uuid})
+        )
+
+    calibrer_debimetre.short_description = "Calibrer le débitmètre"
 
     def push_reload(self, request, queryset):
         ch = get_channel_layer()
@@ -558,5 +576,51 @@ class HistoriqueMaintenanceAdmin(ModelAdmin):
 
     @admin.display(description="Durée (s)", ordering="ended_at")
     def duree_s(self, obj):
+        d = obj.duration_seconds
+        return int(d) if d is not None else "—"
+
+
+# ---------------------------------------------------------------------------
+# Sessions calibration
+# ---------------------------------------------------------------------------
+@admin.register(SessionCalibration)
+class SessionCalibrationAdmin(ModelAdmin):
+    list_display = ("started_at", "tireuse_bec", "uid",
+                    "volume_servi_cl", "volume_reel_cl", "ecart_pct", "duree_s_cal")
+    list_filter = (DateRangeFilter, "tireuse_bec")
+    search_fields = ("uid",)
+    date_hierarchy = "started_at"
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).filter(is_calibration=True)
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    @admin.display(description="Django (cl)", ordering="volume_delta_ml")
+    def volume_servi_cl(self, obj):
+        return f"{obj.volume_delta_ml / 10:.1f}"
+
+    @admin.display(description="Verre (cl)", ordering="volume_reel_ml")
+    def volume_reel_cl(self, obj):
+        if obj.volume_reel_ml:
+            return f"{obj.volume_reel_ml / 10:.1f}"
+        return "—"
+
+    @admin.display(description="Écart")
+    def ecart_pct(self, obj):
+        if obj.volume_reel_ml and obj.volume_delta_ml:
+            ecart = (
+                (float(obj.volume_delta_ml) - float(obj.volume_reel_ml))
+                / float(obj.volume_reel_ml) * 100
+            )
+            return f"{ecart:+.1f}%"
+        return "—"
+
+    @admin.display(description="Durée (s)", ordering="ended_at")
+    def duree_s_cal(self, obj):
         d = obj.duration_seconds
         return int(d) if d is not None else "—"

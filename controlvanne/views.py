@@ -477,15 +477,30 @@ def api_rfid_event(request):
 
     # A. Début de versage
     if event_type == "pour_start":
-        # On informe juste l'écran (Vert)
-        start_balance = str(session.card.balance) if session.card else "0.00"
-        _ws_push(
-            tireuse_bec,
-            {
+        # Session maintenance : payload maintenance cohérent dès le début
+        if session.is_maintenance:
+            produit = session.produit_maintenance_snapshot or "Nettoyage"
+            _ws_push(tireuse_bec, {
+                "tireuse_bec": tireuse_bec.nom_tireuse,
+                "tireuse_bec_uuid": str(tireuse_bec.uuid),
+                "maintenance": True,
+                "present": True,
+                "authorized": True,
+                "vanne_ouverte": True,
+                "session_done": False,
+                "uid": uid,
+                "volume_ml": 0.0,
+                "message": f"Nettoyage — {produit}",
+            })
+        else:
+            # Session normale : vanne_ouverte: True dès le pour_start (évite le flash rouge)
+            start_balance = str(session.card.balance) if session.card else "0.00"
+            _ws_push(tireuse_bec, {
                 "tireuse_bec": tireuse_bec.nom_tireuse,
                 "tireuse_bec_uuid": str(tireuse_bec.uuid),
                 "present": True,
                 "authorized": True,
+                "vanne_ouverte": True,
                 "uid": uid,
                 "liquid_label": session.liquid_label_snapshot,
                 "balance": start_balance,
@@ -495,8 +510,7 @@ def api_rfid_event(request):
                 "prix_litre": str(tireuse_bec.prix_litre),
                 "monnaie": tireuse_bec.monnaie,
                 "message": f"Servez-vous ! Solde: {start_balance}€",
-            },
-        )
+            })
 
     # B. Mise à jour ou Fin
     elif event_type in ["pour_update", "pour_end"]:
