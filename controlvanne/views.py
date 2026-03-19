@@ -37,7 +37,7 @@ def panel_multi(request):
             print(f"DEBUG: cherche par UUID, trouvé: {becs.count()}")
         except (ValueError, TypeError):
             print(f"DEBUG: pas un UUID, chercher par nom")
-            becs = TireuseBec.objects.filter(name__iexact=tireuse_bec)
+            becs = TireuseBec.objects.filter(nom_tireuse__iexact=tireuse_bec)
             print(f"DEBUG: trouvé par nom: {becs.count()}")
         if not becs:
             becs = TireuseBec.objects.all()
@@ -377,7 +377,7 @@ def api_rfid_event(request):
         tireuse_bec = TireuseBec.objects.filter(uuid=target_uuid_raw).first()
         if not tireuse_bec:
             tireuse_bec = TireuseBec.objects.filter(
-                name__iexact=target_uuid_raw
+                nom_tireuse__iexact=target_uuid_raw
             ).first()
 
     # 3. DERNIER RECOURS

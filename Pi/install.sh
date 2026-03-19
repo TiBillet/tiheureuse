@@ -186,7 +186,12 @@ echo "Installation des dépendances Python..."
 source "$VENV_DIR/bin/activate"
 pip install --upgrade pip
 # LES LIBS DEMANDÉES EXPLICITEMENT :
-pip install pyserial flask requests pigpio mfrc522 RPi.GPIO spidev python-dotenv channels daphne pyscard
+pip install pyserial flask requests pigpio mfrc522 RPi.GPIO spidev python-dotenv channels daphne
+
+# pyscard uniquement pour ACR122U (nécessite libpcsclite-dev pour compiler)
+if [ "$RFID_TYPE" = "ACR122U" ]; then
+    pip install pyscard
+fi
 
 # Si requirements.txt existe, on l'installe aussi pour être sûr
 if [ -f "requirements.txt" ]; then
@@ -214,7 +219,7 @@ done
 cat << EOF > "$TARGET_DIR/.env"
 # Généré par le script d'installation
 TIREUSE_BEC=$TIREUSE_BEC
-NOM_TIREUSE=$NOM_TIREUSE
+NOM_TIREUSE="$NOM_TIREUSE"
 API_URL=$DJANGO_SERVER
 BACKEND_HOST=$BACKEND_HOST_PARSED
 BACKEND_PORT=$BACKEND_PORT_PARSED

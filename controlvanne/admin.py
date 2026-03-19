@@ -646,5 +646,6 @@ class ConfigurationAdmin(ModelAdmin):
     def changelist_view(self, request, extra_context=None):
         # Redirige la vue liste directement vers le formulaire unique
         from django.shortcuts import redirect
+        from django.urls import reverse
         obj = Configuration.get()
-        return redirect(f"../{obj.pk}/change/")
+        return redirect(reverse("admin:controlvanne_configuration_change", args=[obj.pk]))
