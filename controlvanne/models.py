@@ -151,12 +151,12 @@ class TireuseBec(models.Model):
 
     @property
     def prix_litre(self) -> Decimal:
-        """Prix effectif : override admin si défini, sinon prix du fût, sinon 10.00."""
+        """Prix effectif : override admin si défini, sinon prix du fût, sinon 0.00."""
         if self.prix_litre_override is not None:
             return self.prix_litre_override
         if self.fut_actif and self.fut_actif.prix_litre:
             return self.fut_actif.prix_litre
-        return Decimal("10.00")
+        return Decimal("0.00")
 
     @property
     def reservoir_max_ml(self) -> float:

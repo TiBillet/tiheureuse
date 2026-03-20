@@ -201,7 +201,22 @@ def api_rfid_authorize(request):
         })
         return JsonResponse({"authorized": False, "error": "Tireuse en maintenance"}, status=403)
 
-    # 4. Vérification Carte (seulement si tireuse en service)
+    # 4a. Pas de fût assigné → vanne bloquée même avec une carte valide
+    if not tireuse_bec.fut_actif:
+        msg = "Aucun fût assigné"
+        print(f"⛔ REFUS {uid} : {msg} sur {tireuse_bec.nom_tireuse}")
+        _ws_push(tireuse_bec, {
+            "tireuse_bec": tireuse_bec.nom_tireuse,
+            "tireuse_bec_uuid": str(tireuse_bec.uuid),
+            "present": True,
+            "authorized": False,
+            "vanne_ouverte": False,
+            "uid": uid,
+            "message": msg,
+        })
+        return JsonResponse({"authorized": False, "error": msg}, status=403)
+
+    # 4b. Vérification Carte (seulement si tireuse en service et fût présent)
     card = Card.objects.filter(uid__iexact=uid, is_active=True).first()
 
     # --- CAS ERREUR : CARTE INCONNUE / EXPIRÉE ---
@@ -723,7 +738,9 @@ def api_rfid_register(request):
     except (ValueError, AttributeError):
         return JsonResponse({"error": "Format UUID invalide"}, status=400)
 
-    # 5. Création de la tireuse si elle n'existe pas encore
+    # 5. Création ou récupération de la tireuse
+    # L'UUID est dérivé de l'adresse MAC, donc stable à chaque réinstall.
+    # On remet toujours prix_litre_override à 0 pour garantir un état propre après réinstall.
     note = f"Auto-enregistrée depuis {hostname}" if hostname else "Auto-enregistrée"
     tireuse, created = TireuseBec.objects.get_or_create(
         uuid=uuid_obj,
@@ -736,6 +753,10 @@ def api_rfid_register(request):
             "prix_litre_override": Decimal("0.00"),
         },
     )
+    if not created:
+        # Réinstall détectée (même UUID/MAC) : remise à zéro du prix
+        tireuse.prix_litre_override = Decimal("0.00")
+        tireuse.save(update_fields=["prix_litre_override"])
 
     return JsonResponse(
         {
