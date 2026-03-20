@@ -1,0 +1,23 @@
+.venv
+venv/
+db.sqlite3
+staticfiles/
+.idea
+.vscode/
+.DS_Store
+Thumbs.db
+# --- Python
+__pycache__/
+*.py[cod]
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+# --- Migrations Django (tout ignorer sauf __init__.py)
+**/migrations/*
+!**/migrations/__init__.py
+bash_install.txt
+/Pi/first/
+
