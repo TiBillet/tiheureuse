@@ -186,7 +186,7 @@ echo "Installation des dépendances Python..."
 source "$VENV_DIR/bin/activate"
 pip install --upgrade pip
 # LES LIBS DEMANDÉES EXPLICITEMENT :
-pip install pyserial flask requests pigpio mfrc522 RPi.GPIO spidev python-dotenv channels daphne
+pip install pyserial flask requests pigpio mfrc522 python-dotenv systemd-python
 
 # pyscard uniquement pour ACR122U (nécessite libpcsclite-dev pour compiler)
 if [ "$RFID_TYPE" = "ACR122U" ]; then

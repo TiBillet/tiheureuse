@@ -732,6 +732,8 @@ def api_rfid_register(request):
             # Désactivée par défaut : l'admin doit assigner un fût et un débitmètre
             "enabled": False,
             "notes": note,
+            # Prix initialisé à 0 — à configurer dans l'admin
+            "prix_litre_override": Decimal("0.00"),
         },
     )
 
