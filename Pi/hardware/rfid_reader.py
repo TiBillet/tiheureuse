@@ -5,6 +5,7 @@ from mfrc522 import MFRC522
 from utils.logger import logger
 from utils.exceptions import RFIDInitError, RFIDReadError
 from utils.serial_tools import SerialReader
+from config.settings import RC522_SPI_DEVICE, RC522_SPI_SPEED
 
 load_dotenv()
 
@@ -33,8 +34,8 @@ class RFIDReader:
     def _init_rc522(self):
         """Initialise le lecteur SPI RC522."""
         try:
-            # device=0, spd=1000000 correspond au SPI0
-            self.reader = MFRC522(device=0, spd=1000000)
+            # RC522_SPI_DEVICE et RC522_SPI_SPEED sont lus depuis .env (défaut : SPI0 à 1 MHz)
+            self.reader = MFRC522(device=RC522_SPI_DEVICE, spd=RC522_SPI_SPEED)
             logger.info("Lecteur RC522 prêt.")
         except Exception as e:
             logger.error(f"Erreur init RC522: {e}")

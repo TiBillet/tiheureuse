@@ -16,6 +16,9 @@ LOG_DIR.mkdir(parents=True, exist_ok=True)  # Crée le répertoire si inexistant
 # --- Configuration RFID ---
 RFID_DEVICE = os.getenv("RFID_DEVICE", "serial0")  # Port série pour VMA405
 RFID_TIMEOUT = float(os.getenv("RFID_TIMEOUT", "1.0"))  # Timeout en secondes
+# RC522 uniquement : bus SPI (0 = SPI0, 1 = SPI1) et vitesse en Hz
+RC522_SPI_DEVICE = int(os.getenv("RC522_SPI_DEVICE", "0"))
+RC522_SPI_SPEED  = int(os.getenv("RC522_SPI_SPEED", "1000000"))
 
 # --- Configuration Vanne ---
 # Utilise GPIO_VANNE pour correspondre au nom lu par hardware/valve.py

@@ -7,6 +7,7 @@ from django.conf import settings
 from django.utils import timezone
 from asgiref.sync import async_to_sync
 from .models import Card, CarteMaintenance, Configuration, RfidSession, TireuseBec
+from .ws_payloads import WsPayload
 from decimal import Decimal, ROUND_HALF_UP
 from django.db import transaction
 from django.db.models import F
@@ -76,9 +77,10 @@ def _safe(name: str) -> str:
     return (name or "").strip().lower()[:80] or "all"
 
 
-def _ws_push(tireuse_bec, data):
+def _ws_push(tireuse_bec, data: WsPayload):
     """
     Envoie un message WebSocket à un groupe spécifique ET au groupe 'all'.
+    Le type du paramètre data est documenté dans controlvanne/ws_payloads.py.
     """
     channel_layer = get_channel_layer()
     if not channel_layer:

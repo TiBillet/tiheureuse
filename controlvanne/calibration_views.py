@@ -1,9 +1,17 @@
 from decimal import Decimal, InvalidOperation
 
-from django.contrib.admin.views.decorators import staff_member_required
+from django.contrib.auth.decorators import user_passes_test
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.views.decorators.http import require_GET, require_POST
+
+# La calibration modifie le facteur du débitmètre (impact direct sur la facturation).
+# On la réserve aux superusers uniquement — un simple staff pourrait calibrer
+# n'importe quelle tireuse, même celles qu'il ne gère pas.
+superuser_required = user_passes_test(
+    lambda u: u.is_active and u.is_superuser,
+    login_url="/admin/login/",
+)
 
 from .models import Debimetre, RfidSession, TireuseBec
 
@@ -68,7 +76,7 @@ def _construire_mesures_recap(tireuse, sessions_calibrees):
 # Vues
 # ---------------------------------------------------------------------------
 
-@staff_member_required
+@superuser_required
 def calibration_page(request, uuid):
     """
     Page principale du wizard de calibration pour une tireuse.
@@ -100,7 +108,7 @@ def calibration_page(request, uuid):
     })
 
 
-@staff_member_required
+@superuser_required
 @require_POST
 def calibration_soumettre(request, uuid, session_id):
     """
@@ -172,7 +180,7 @@ def calibration_soumettre(request, uuid, session_id):
     })
 
 
-@staff_member_required
+@superuser_required
 @require_POST
 def calibration_appliquer(request, uuid):
     """
