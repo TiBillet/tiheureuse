@@ -35,7 +35,7 @@ sudo apt-get update
 sudo apt-get install -y --no-install-recommends \
   git nano locales fontconfig curl ca-certificates \
   python3 python3-venv python3-pip python3-dev \
-  pigpio python3-pigpio \
+  mosquitto mosquitto-clients \
   xserver-xorg xinit openbox unclutter x11-apps \
   chromium-browser chromium-chromedriver \
   fonts-dejavu-core xfonts-base \
@@ -186,7 +186,7 @@ echo "Installation des dépendances Python..."
 source "$VENV_DIR/bin/activate"
 pip install --upgrade pip
 # LES LIBS DEMANDÉES EXPLICITEMENT :
-pip install pyserial flask requests pigpio mfrc522 python-dotenv systemd-python
+pip install pyserial flask requests paho-mqtt mfrc522 python-dotenv systemd-python
 
 # pyscard uniquement pour ACR122U (nécessite libpcsclite-dev pour compiler)
 if [ "$RFID_TYPE" = "ACR122U" ]; then
@@ -227,11 +227,9 @@ BACKEND_API_KEY=$BACKEND_API_KEY
 DEBUG=False
 # Lecteur RFID
 RFID_TYPE=$RFID_TYPE
-# GPIO Settings
-GPIO_VANNE=18
-VALVE_ACTIVE_HIGH=False
-GPIO_FLOW_SENSOR=23
-FLOW_CALIBRATION_FACTOR=6.5
+# MQTT (broker Mosquitto local sur le Pi)
+MQTT_BROKER_HOST=localhost
+MQTT_BROKER_PORT=1883
 # Réseau
 NETWORK_TIMEOUT=5.0
 MAX_RETRIES=3
@@ -342,9 +340,9 @@ chown "$SYSUSER:$SYSUSER" "/home/$SYSUSER/.xinitrc"
 echo ""
 echo "[8/10] 🔧 Création des Services..."
 
-# Pigpiod
-sudo systemctl enable pigpiod
-sudo systemctl start pigpiod
+# Mosquitto (broker MQTT local)
+sudo systemctl enable mosquitto
+sudo systemctl start mosquitto
 
 # Pcscd (requis pour ACR122U)
 if [ "$RFID_TYPE" = "ACR122U" ]; then
@@ -387,9 +385,9 @@ EOF
 cat << EOF | sudo tee /etc/systemd/system/tibeer.service
 [Unit]
 Description==Agent RFID + Vanne (tibeer)
-After=network-online.target pigpiod.service
-Wants=network-online.target pigpiod.service
-Requires=pigpiod.service
+After=network-online.target mosquitto.service
+Wants=network-online.target mosquitto.service
+Requires=mosquitto.service
 
 [Service]
 Type=simple

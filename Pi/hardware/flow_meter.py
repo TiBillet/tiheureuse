@@ -1,119 +1,94 @@
-import time
-import pigpio
-import os
 from utils.logger import logger
 from utils.exceptions import FlowMeterError
 
 
 class FlowMeter:
     """
-    Gestion du débitmètre via pigpio (interruptions précises).
-    Calcule le volume total et le débit instantané.
+    Lecture du débitmètre via MQTT ← ESP32.
+    Remplace le comptage pigpio local.
+
+    L'ESP32 publie les données toutes les secondes sur tiheureuse/<uuid>/flow :
+      { "volume_ml": 120.5, "debit_cl_min": 32.1, "total_pulses": 47 }
+
+    Si l'ESP32 atteint le volume maximum configuré, il publie :
+      { "force_close": true, "volume_ml": 450.0 }
     """
 
-    def __init__(self, calibration_factor: float = None):
-        # Configuration depuis variables d'env
-        self.gpio_pin = int(os.getenv("GPIO_FLOW_SENSOR", "23"))
+    def __init__(self, mqtt_client, calibration_factor: float = None):
+        self.mqtt_client = mqtt_client
+
         if calibration_factor is not None:
             self.calibration_factor = float(calibration_factor)
         else:
-            try:
-                self.calibration_factor = float(os.getenv("FLOW_CALIBRATION_FACTOR", "6.5"))
-            except ValueError:
-                self.calibration_factor = 6.5
+            self.calibration_factor = 6.5
 
-        self.pi = pigpio.pi()
-        if not self.pi.connected:
-            logger.error("Pigpio non connecté ! Le débitmètre ne fonctionnera pas.")
-            logger.error("Avez-vous lancé 'sudo pigpiod' ?")
-            raise FlowMeterError(
-                "Pigpio non connecté : impossible d'initialiser le débitmètre"
-            )
+        # Données reçues depuis l'ESP32 (mise à jour push toutes les secondes)
+        self.volume_total_ml    = 0.0
+        self.debit_cl_min       = 0.0
+        self.total_pulses       = 0
 
-        # Config GPIO
-        self.pi.set_mode(self.gpio_pin, pigpio.INPUT)
-        self.pi.set_pull_up_down(self.gpio_pin, pigpio.PUD_UP)
+        # Drapeau levé si l'ESP32 signale que le volume max est atteint
+        self.force_close_requested = False
 
-        # Variables internes
-        self.flow_count = 0
-        self.total_pulses = 0
-        self.volume_total_ml = 0.0
-        self.last_time = time.time()
-        self.current_flow_rate = 0.0  # L/min
+        self.mqtt_client.subscribe("flow", self._on_flow_data)
+        logger.info("[DEBIT] Débitmètre initialisé en mode MQTT")
 
-        # Callback (Interruption)
-        self.cb = self.pi.callback(self.gpio_pin, pigpio.FALLING_EDGE, self._callback)
-        logger.info(f"Débitmètre initialisé sur GPIO {self.gpio_pin}")
+    def _on_flow_data(self, payload: dict):
+        """Reçoit les données de volume et débit depuis l'ESP32."""
 
-    def _callback(self, gpio, level, tick):
-        """Appelé à chaque impulsion du capteur."""
-        self.flow_count += 1
-        self.total_pulses += 1
+        # Cas force_close : l'ESP32 a fermé la vanne de son côté
+        if payload.get("force_close"):
+            logger.warning("[DEBIT] ESP32 signale volume max atteint → force_close")
+            self.force_close_requested = True
+            # On met quand même à jour le volume final
+            if "volume_ml" in payload:
+                self.volume_total_ml = float(payload["volume_ml"])
+            return
+
+        self.volume_total_ml = float(payload.get("volume_ml", 0.0))
+        self.debit_cl_min    = float(payload.get("debit_cl_min", 0.0))
+        self.total_pulses    = int(payload.get("total_pulses", 0))
 
     def update(self):
         """
-        À appeler régulièrement (ex: toutes les secondes) pour mettre à jour
-        le débit instantané (L/min) et le volume cumulé.
+        Compatibilité avec l'API existante de TibeerController.
+        Les données arrivent en push depuis l'ESP32 — rien à calculer ici.
         """
-        now = time.time()
-        delta_t = now - self.last_time
+        pass
 
-        # On met à jour si plus de 0.5s s'est écoulé pour lisser
-        if delta_t > 0.5:
-            # Fréquence en Hz
-            freq = self.flow_count / delta_t
+    def volume_l(self) -> float:
+        """Retourne le volume total en litres."""
+        return self.volume_total_ml / 1000.0
 
-            # Calcul débit L/min = (Hz / facteur) * 60
-            self.current_flow_rate = (
-                (freq / self.calibration_factor) * 60 if freq > 0 else 0
-            )
-
-            # Ajout au volume total (L) converti en ml
-            # Volume ce cycle = (Débit L/min / 60) * delta_t_sec * 1000
-            vol_added = (self.current_flow_rate / 60) * delta_t * 1000
-            self.volume_total_ml += vol_added
-
-            # Reset compteurs intermédiaires
-            self.flow_count = 0
-            self.last_time = now
-
-            return self.current_flow_rate
-        return self.current_flow_rate
-
-    def volume_l(self):
-        """
-        Fonction requise par TibeerController.
-        Retourne le volume total en Litres.
-        Formule: 1 L = (Facteur * 60) impulsions.
-        """
-        pulses_per_liter = self.calibration_factor * 60
-        if pulses_per_liter == 0:
-            return 0.0
-        return self.total_pulses / pulses_per_liter
-
-    def get_volume_ml(self):
+    def get_volume_ml(self) -> float:
         return self.volume_total_ml
 
-    def get_flow_rate(self):
-        """Retourne le débit en L/min (usage interne)."""
-        return self.current_flow_rate
-
-    def get_flow_rate_cl(self):
-        """Retourne le débit en cl/min."""
-        return self.current_flow_rate * 100
+    def get_flow_rate_cl(self) -> float:
+        """Retourne le débit en cL/min."""
+        return self.debit_cl_min
 
     def set_calibration_factor(self, factor: float):
-        """Met à jour le facteur de calibration reçu depuis le backend Django."""
+        """
+        Met à jour le facteur de calibration et le transmet à l'ESP32 via MQTT.
+        L'ESP32 utilisera ce nouveau facteur pour ses calculs locaux.
+        """
         self.calibration_factor = float(factor)
-        logger.info(f"Débitmètre : facteur de calibration mis à jour → {self.calibration_factor}")
+        self.mqtt_client.publish("cmd", {
+            "action": "set_calibration",
+            "calibration_factor": round(self.calibration_factor, 4),
+        })
+        logger.info(f"[DEBIT] Facteur calibration transmis à l'ESP32 : {self.calibration_factor}")
 
     def reset(self):
-        self.flow_count = 0
-        self.total_pulses = 0
-        self.current_flow_rate = 0.0
-        self.last_time = time.time()
+        """
+        Remet à zéro les compteurs locaux.
+        Note : l'ESP32 remet lui-même ses compteurs à zéro à la réception d'une commande 'open'.
+        """
+        self.volume_total_ml       = 0.0
+        self.debit_cl_min          = 0.0
+        self.total_pulses          = 0
+        self.force_close_requested = False
 
     def cleanup(self):
-        if self.cb:
-            self.cb.cancel()
-        # Note: on ne stop pas self.pi ici car partagé avec Valve si besoin,
+        # Pas de ressource locale à libérer (MQTT géré par MqttHardwareClient)
+        pass

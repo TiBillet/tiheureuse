@@ -341,6 +341,9 @@ def api_rfid_authorize(request):
             "unit_label": tireuse_bec.monnaie,
             "unit_ml": str(tireuse_bec.unit_ml),
             "flow_calibration_factor": flow_factor,
+            # Volume max autorisé pour cette session — transmis à l'ESP32
+            # pour qu'il ferme la vanne localement si atteint (sécurité offline)
+            "allowed_ml_session": float(open_session.allowed_ml_session or 0),
         }
     )
 

@@ -32,6 +32,10 @@ FLOW_CALIBRATION_FACTOR = float(
 # Utilise GPIO_FLOW_SENSOR pour correspondre au nom lu par hardware/flow_meter.py
 GPIO_FLOW_SENSOR = int(os.getenv("GPIO_FLOW_SENSOR", "16"))
 
+# --- Configuration MQTT (broker Mosquitto local sur le Pi) ---
+MQTT_BROKER_HOST = os.getenv("MQTT_BROKER_HOST", "localhost")
+MQTT_BROKER_PORT = int(os.getenv("MQTT_BROKER_PORT", "1883"))
+
 # --- Configuration Backend ---
 BACKEND_HOST = os.getenv("BACKEND_HOST", "localhost")
 BACKEND_PORT = int(os.getenv("BACKEND_PORT", "8000"))

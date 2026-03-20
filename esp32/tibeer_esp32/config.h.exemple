@@ -1,0 +1,56 @@
+// =============================================================================
+// config.h — Configuration du firmware TiBeer ESP32
+// Modifiez ce fichier avant de flasher l'ESP32.
+// =============================================================================
+#pragma once
+
+// -----------------------------------------------------------------------------
+// WiFi
+// -----------------------------------------------------------------------------
+#define WIFI_SSID       "TON SSID"
+#define WIFI_PASSWORD   "TON MOT DE PASSE"
+
+// -----------------------------------------------------------------------------
+// MQTT — adresse du broker Mosquitto qui tourne sur le Pi
+// -----------------------------------------------------------------------------
+#define MQTT_BROKER_IP   "192.168.1.18"   // IP locale du Pi
+#define MQTT_BROKER_PORT  1883
+#define MQTT_CLIENT_ID   "tibeer-esp32"
+// Laisser vide si pas d'authentification Mosquitto
+#define MQTT_USER        ""
+#define MQTT_PASSWORD    ""
+
+// -----------------------------------------------------------------------------
+// Identité de la tireuse
+// Doit correspondre à l'UUID généré par install.sh sur le Pi (uuid5 depuis MAC)
+// -----------------------------------------------------------------------------
+#define TIREUSE_UUID  "8cb99470-263d-5e52-915b-45654ad4d7ee"
+
+// -----------------------------------------------------------------------------
+// GPIO
+// -----------------------------------------------------------------------------
+#define PIN_VANNE       26   // Sortie relais/MOSFET commande électrovanne (DAC2 — pas de SPI, libre au boot)
+#define PIN_DEBIMETRE   27   // Entrée impulsions débitmètre (ADC2 — pas de SPI, libre au boot)
+
+// Vrai si HIGH = vanne ouverte (relais NO), Faux si HIGH = vanne fermée (relais NC)
+#define VALVE_ACTIVE_HIGH  false
+
+// -----------------------------------------------------------------------------
+// Débitmètre — même logique que Pi/hardware/flow_meter.py
+// Volume (L) = total_pulses / (facteur * 60)
+// Débit (L/min) = (impulsions_par_sec / facteur) * 60
+// -----------------------------------------------------------------------------
+#define FLOW_CALIBRATION_FACTOR  6.5f   // Impulsions par L/min (mis à jour par MQTT)
+
+// -----------------------------------------------------------------------------
+// Sécurité
+// Si aucun message MQTT reçu depuis ce délai → fermeture vanne automatique
+// Protège contre un crash du Pi ou une coupure réseau pendant un tirage.
+// -----------------------------------------------------------------------------
+#define WATCHDOG_TIMEOUT_MS  10000UL   // 10 secondes
+
+// -----------------------------------------------------------------------------
+// Intervalles de publication
+// -----------------------------------------------------------------------------
+#define FLOW_PUBLISH_INTERVAL_MS   1000UL   // Envoi volume/débit toutes les secondes
+#define STATUS_PUBLISH_INTERVAL_MS 5000UL   // Heartbeat toutes les 5 secondes

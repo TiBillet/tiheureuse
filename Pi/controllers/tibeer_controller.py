@@ -2,6 +2,7 @@ import time
 import sys
 import threading
 import os
+from hardware.mqtt_client import MqttHardwareClient
 from hardware.rfid_reader import RFIDReader
 from hardware.valve import Valve
 from hardware.flow_meter import FlowMeter
@@ -21,8 +22,10 @@ class TibeerController:
     def __init__(self):
         logger.info("Initialisation TiBeer Controller (Mode Session Django)...")
         self.rfid = RFIDReader()
-        self.valve = Valve()
-        self.flow_meter = FlowMeter()
+        # Le client MQTT est partagé entre la vanne et le débitmètre
+        self.mqtt = MqttHardwareClient()
+        self.valve = Valve(self.mqtt)
+        self.flow_meter = FlowMeter(self.mqtt)
         self.client = BackendClient()
         # État du système
         self.current_uid = None
@@ -102,11 +105,19 @@ class TibeerController:
             if flow_factor is not None:
                 self.flow_meter.set_calibration_factor(flow_factor)
 
-            # Reset débitmètre (snapshot)
-            self.session_start_vol = self.flow_meter.volume_l() * 1000.0
+            # Reset débitmètre et drapeau force_close avant d'ouvrir
+            self.flow_meter.reset()
+            self.session_start_vol = 0.0
 
-            # Action Physique
-            self.valve.open()
+            # Volume maximum autorisé pour cette session (calculé côté Django)
+            # Transmis à l'ESP32 pour qu'il ferme la vanne lui-même si atteint
+            allowed_ml = float(auth_response.get("allowed_ml_session", 0))
+
+            # Ouverture de la vanne via MQTT
+            self.valve.open(
+                max_ml=allowed_ml,
+                calibration_factor=float(flow_factor) if flow_factor else 6.5,
+            )
             self.is_serving = True
 
             logger.info(f"Autorisation OK. Session {self.session_id}. Vanne ouverte.")
@@ -157,9 +168,13 @@ class TibeerController:
                 self.last_update_ts = now
                 return
 
-            # Vérifier si fermeture forcée demandée par le serveur
-            if response and response.get("force_close"):
-                logger.warning("⚠️ SOLDE ÉPUISÉ - Fermeture vanne")
+            # Fermeture forcée : soit demandée par Django, soit par l'ESP32 (volume max atteint)
+            force_close_django = response and response.get("force_close")
+            force_close_esp32  = self.flow_meter.force_close_requested
+
+            if force_close_django or force_close_esp32:
+                raison = "solde épuisé (Django)" if force_close_django else "volume max atteint (ESP32)"
+                logger.warning(f"⚠️ FERMETURE FORCÉE — {raison}")
                 self._end_session_actions()
                 # Envoyer l'event de fin
                 self.client.send_event(
@@ -211,5 +226,9 @@ class TibeerController:
         logger.info("Nettoyage des ressources...")
         try:
             self.valve.close()
-        except:
+        except Exception:
+            pass
+        try:
+            self.mqtt.cleanup()
+        except Exception:
             pass

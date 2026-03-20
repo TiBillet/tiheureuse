@@ -20,4 +20,12 @@ build/
 !**/migrations/__init__.py
 bash_install.txt
 /Pi/first/
+db.sqlite3
+claude.md
+.claude
+GUIDELINES.md
+JOURNAL.md
+# --- ESP32 : config avec identifiants WiFi réels
+esp32/tibeer_esp32/config.h
+
 
