@@ -202,7 +202,7 @@ class TireuseBecAdmin(ModelAdmin):
     def prix_effectif_display(self, obj):
         pL = obj.prix_litre  # propriété calculée
         label = f"{pL} {obj.monnaie}"
-        if obj.prix_litre_override is not None:
+        if obj.prix_litre_override is not None and obj.prix_litre_override > 0:
             return format_html('<span title="Override actif">{} ✎</span>', label)
         return label
 

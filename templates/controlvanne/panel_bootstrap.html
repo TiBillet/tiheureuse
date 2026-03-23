@@ -215,6 +215,7 @@
       lastBalance: null,
       wasPresent: false,
       isMaintenance: false,
+      resetTimer: null,
     };
     // Init prix et jauge depuis template
     if (prixBlock) {
@@ -356,6 +357,8 @@
         // CAS 1 : Carte présente
         if (payload.present) {
           c.wasPresent = true;
+          // Annuler tout timer de reset en cours (nouvelle carte arrivée avant la fin du délai)
+          if (c.resetTimer) { clearTimeout(c.resetTimer); c.resetTimer = null; }
           c.uid.textContent = payload.uid || 'Lu...';
           if (typeof payload.authorized !== 'undefined') setBadge(c.auth, payload.authorized);
           c.state.className = payload.vanne_ouverte ? 'badge bg-success' : 'badge bg-danger';
@@ -366,10 +369,16 @@
           return;
         }
 
+        // Pour les messages sans carte présente, capturer wasPresent AVANT de le réinitialiser.
+        // Si un session_done arrive après l'authorize d'une nouvelle carte (race condition réseau),
+        // wasCurrentlyPresent=true permet de l'ignorer et de ne pas écraser le solde de la nouvelle carte.
+        const wasCurrentlyPresent = c.wasPresent;
         c.wasPresent = false;
 
         // CAS 2 : Fin de session
         if (payload.session_done) {
+          // Session_done tardif : une nouvelle carte est déjà active → ignorer
+          if (wasCurrentlyPresent) return;
           c.auth.className = 'badge bg-info text-dark';
           c.auth.textContent = 'Terminé';
           c.state.className = 'badge bg-danger';
@@ -378,7 +387,7 @@
           if (payload.balance) { c.balance.textContent = payload.balance; c.lastBalance = payload.balance; }
           if (payload.message) c.msg.textContent = payload.message;
           if (c.lastBalance && parseFloat(payload.volume_ml || 0) > 0) showPopup(c.lastBalance);
-          setTimeout(() => resetCardUI(c), 5000);
+          c.resetTimer = setTimeout(() => { c.resetTimer = null; resetCardUI(c); }, 5000);
           return;
         }
 
