@@ -151,8 +151,9 @@ class TireuseBec(models.Model):
 
     @property
     def prix_litre(self) -> Decimal:
-        """Prix effectif : override admin si défini, sinon prix du fût, sinon 0.00."""
-        if self.prix_litre_override is not None:
+        """Prix effectif : override admin si défini ET non nul, sinon prix du fût, sinon 0.00.
+        Un override à zéro (ou vide) est ignoré : on remonte le prix du fût."""
+        if self.prix_litre_override is not None and self.prix_litre_override > 0:
             return self.prix_litre_override
         if self.fut_actif and self.fut_actif.prix_litre:
             return self.fut_actif.prix_litre
@@ -167,10 +168,12 @@ class TireuseBec(models.Model):
 
     @property
     def unit_ml(self) -> Decimal:
-        """ml par unité de monnaie — calculé depuis prix_litre. Utilisé par le Pi."""
+        """ml par unité de monnaie — calculé depuis prix_litre. Utilisé par le Pi.
+        Retourne 0.00 quand le prix est à zéro : signal « service gratuit »,
+        aucune facturation et volume limité par le stock (pas le solde)."""
         if self.prix_litre and self.prix_litre > 0:
             return (Decimal("1000") / self.prix_litre).quantize(Decimal("0.01"))
-        return Decimal("100.00")
+        return Decimal("0.00")
 
     fut_actif = models.ForeignKey(
         "Fut",

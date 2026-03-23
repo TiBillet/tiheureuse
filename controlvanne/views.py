@@ -242,7 +242,8 @@ def api_rfid_authorize(request):
         return JsonResponse({"authorized": False, "error": msg}, status=403)
 
     # --- CAS ERREUR : SOLDE INSUFFISANT ---
-    if card.balance <= 0:
+    # Service gratuit (unit_ml == 0) : on ne vérifie pas le solde
+    if card.balance <= 0 and tireuse_bec.unit_ml > 0:
         msg = f"Solde insuffisant ({card.balance}€)"
         print(f"⛔ REFUS {uid} : {msg}")
 
@@ -262,12 +263,23 @@ def api_rfid_authorize(request):
         return JsonResponse({"authorized": False, "error": msg}, status=403)
 
     # 5. Gestion de la Session (Succès)
+    # Fermer toute session orpheline (pour_end non reçu suite à une erreur réseau).
+    # Cela garantit que unit_ml_snapshot reflète toujours le prix courant de la tireuse.
     open_session = RfidSession.objects.filter(card=card, ended_at__isnull=True).first()
+    if open_session:
+        open_session.ended_at = timezone.now()
+        open_session.last_message = "Session fermée automatiquement (nouvelle présentation de carte)"
+        open_session.save(update_fields=["ended_at", "last_message"])
+        open_session = None
 
     if not open_session:
 
-        # Calcul du volume max autorisé basé sur le solde de la carte
-        max_volume_ml = float(card.balance) * float(tireuse_bec.unit_ml)
+        # Calcul du volume max autorisé
+        # Service gratuit (unit_ml == 0) : volume limité par le stock, pas par le solde
+        if tireuse_bec.unit_ml == 0:
+            max_volume_ml = float(tireuse_bec.reservoir_ml)
+        else:
+            max_volume_ml = float(card.balance) * float(tireuse_bec.unit_ml)
 
         # Plafonnement par le stock disponible (réserve)
         # Si appliquer_reserve est activé, on ne peut pas servir plus que
@@ -301,8 +313,6 @@ def api_rfid_authorize(request):
             unit_ml_snapshot=tireuse_bec.unit_ml,
             allowed_ml_session=max_volume_ml,
         )
-    else:
-        tireuse_bec = open_session.tireuse_bec
 
     # 5. SUCCÈS : Notification Écran (VERT)
     payload_ws = {
@@ -451,7 +461,7 @@ def api_rfid_event(request):
                     remaining_balance = str(last_session.card.balance)
                 else:
                     # Session non terminée, calculer solde estimé
-                    unit_ml = last_session.unit_ml_snapshot or Decimal("100.0")
+                    unit_ml = last_session.unit_ml_snapshot if last_session.unit_ml_snapshot is not None else Decimal("100.0")
                     if unit_ml > 0 and volume_served > 0:
                         units_consumed = (
                             Decimal(str(volume_served)) / unit_ml
@@ -567,7 +577,7 @@ def api_rfid_event(request):
             # (avant la facturation finale)
             estimated_balance = str(session.card.balance) if session.card else "0.00"
             if session.card and current_vol > 0:
-                unit_ml = session.unit_ml_snapshot or Decimal("100.0")
+                unit_ml = session.unit_ml_snapshot if session.unit_ml_snapshot is not None else Decimal("100.0")
                 if unit_ml > 0:
                     units_consumed = (current_vol / unit_ml).quantize(
                         Decimal("0.01"), rounding=ROUND_HALF_UP
@@ -594,7 +604,7 @@ def api_rfid_event(request):
                     session.last_message = f"Nettoyage terminé — {current_vol:.0f} ml ({produit})"
                 elif session.card:
                     card = Card.objects.select_for_update().get(pk=session.card.pk)
-                    unit_ml = session.unit_ml_snapshot or Decimal("100.0")
+                    unit_ml = session.unit_ml_snapshot if session.unit_ml_snapshot is not None else Decimal("100.0")
 
                     session.balance_avant = card.balance
 
@@ -745,7 +755,6 @@ def api_rfid_register(request):
 
     # 5. Création ou récupération de la tireuse
     # L'UUID est dérivé de l'adresse MAC, donc stable à chaque réinstall.
-    # On remet toujours prix_litre_override à 0 pour garantir un état propre après réinstall.
     note = f"Auto-enregistrée depuis {hostname}" if hostname else "Auto-enregistrée"
     tireuse, created = TireuseBec.objects.get_or_create(
         uuid=uuid_obj,
@@ -754,14 +763,17 @@ def api_rfid_register(request):
             # Désactivée par défaut : l'admin doit assigner un fût et un débitmètre
             "enabled": False,
             "notes": note,
-            # Prix initialisé à 0 — à configurer dans l'admin
-            "prix_litre_override": Decimal("0.00"),
+            # None = pas d'override : le prix du fût sera utilisé
+            "prix_litre_override": None,
         },
     )
     if not created:
-        # Réinstall détectée (même UUID/MAC) : remise à zéro du prix
-        tireuse.prix_litre_override = Decimal("0.00")
-        tireuse.save(update_fields=["prix_litre_override"])
+        # Réinstall détectée (même UUID/MAC) : on met à jour le nom et les notes.
+        # On ne touche PAS à prix_litre_override ni à enabled pour ne pas écraser
+        # la configuration faite dans l'admin.
+        tireuse.nom_tireuse = nom_tireuse
+        tireuse.notes = note
+        tireuse.save(update_fields=["nom_tireuse", "notes"])
 
     return JsonResponse(
         {
