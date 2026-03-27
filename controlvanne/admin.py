@@ -5,8 +5,6 @@ from django.contrib.admin import SimpleListFilter
 from django.http import HttpResponse
 from django.utils import timezone
 from django.utils.html import format_html
-from channels.layers import get_channel_layer
-from asgiref.sync import async_to_sync
 from unfold.admin import ModelAdmin, TabularInline
 from .models import (Card, CarteMaintenance, Configuration, Debimetre, Fut, HistoriqueCarte,
                      HistoriqueFut, HistoriqueMaintenance, HistoriqueTireuse,
@@ -145,7 +143,7 @@ class HistoriqueFutAdmin(ModelAdmin):
 class TireuseBecAdmin(ModelAdmin):
     inlines = [HistoriqueFutInline]
     form = TireuseBecForm
-    actions = ["push_kiosk_url", "push_reload", "push_refresh", "calibrer_debimetre"]
+    actions = ["calibrer_debimetre"]
     list_display = (
         "name_with_uuid",
         "fut_actif",
@@ -258,66 +256,6 @@ class TireuseBecAdmin(ModelAdmin):
 
     calibrer_debimetre.short_description = "Calibrer le débitmètre"
 
-    def push_reload(self, request, queryset):
-        ch = get_channel_layer()
-        n = 0
-        for tb in queryset:
-            async_to_sync(ch.group_send)(
-                f"rfid_state.{tb.uuid}",
-                {"type": "state_update", "payload": {"kiosk_reload": True}},
-            )
-            n += 1
-        self.message_user(request, f"Mise à jour de l'affichage envoyé à {n} kiosque(s).")
-
-    push_reload.short_description = "Mise à jour de l'affichage du kiosque"
-
-    def push_refresh(self, request, queryset):
-        # pousse un snapshot vers les panneaux abonnés
-        from .signals import snapshot_for_bec
-        import sys
-
-        print(
-            f"🚀 PUSH_REFRESH APPELE avec {queryset.count()} tireuse(s)",
-            file=sys.stderr,
-        )
-
-        ch = get_channel_layer()
-        if not ch:
-            print("❌ ERREUR: channel_layer est None!", file=sys.stderr)
-            self.message_user(
-                request, "Erreur: channel_layer non disponible", level=messages.ERROR
-            )
-            return
-
-        n = 0
-        for tb in queryset:
-            payload = snapshot_for_bec(tb)
-            group_name = f"rfid_state.{tb.uuid}"
-            print(f"🚀 PUSH_REFRESH vers {group_name}: {payload}", file=sys.stderr)
-
-            try:
-                async_to_sync(ch.group_send)(
-                    group_name,
-                    {"type": "state_update", "payload": payload},
-                )
-                print(f"✅ Message envoye au groupe {group_name}", file=sys.stderr)
-            except Exception as e:
-                print(f"❌ ERREUR envoi au groupe {group_name}: {e}", file=sys.stderr)
-
-            # Envoyer aussi au groupe ALL pour l'interface admin
-            try:
-                async_to_sync(ch.group_send)(
-                    "rfid_state.all",
-                    {"type": "state_update", "payload": payload},
-                )
-                print(f"✅ Message envoye au groupe rfid_state.all", file=sys.stderr)
-            except Exception as e:
-                print(f"❌ ERREUR envoi au groupe all: {e}", file=sys.stderr)
-
-            n += 1
-        self.message_user(request, f"Snapshot poussé à {n} tireuse(s).")
-
-    push_refresh.short_description = "Pousser une mise à jour au panneau"
 
 
 @admin.register(Debimetre)

@@ -13,7 +13,7 @@
              data-reservoir="{{ b.reservoir_ml|floatformat:0 }}">
           <div class="card-header d-flex justify-content-between align-items-center">
             <div>
-              <span class="badge bg-secondary me-2">{{ b.nom_tireuse }}</span>
+              <span class="badge bg-secondary me-2" id="nom-tireuse-{{ b.uuid }}">{{ b.nom_tireuse }}</span>
               <strong class="text-info" id="liquid-{{ b.uuid }}">{{ b.nom_boisson|default:"Liquide" }}</strong>
             </div>
           </div>
@@ -203,6 +203,7 @@
       state:       document.getElementById('state-'  + uuid),
       vol:         document.getElementById('vol-'    + uuid),
       msg:         document.getElementById('msg-'    + uuid),
+      nomTireuse:  document.getElementById('nom-tireuse-' + uuid),
       liquid:      document.getElementById('liquid-' + uuid),
       balance:     document.getElementById('balance-'+ uuid),
       gaugeFill:   document.getElementById('gauge-fill-'  + uuid),
@@ -346,6 +347,10 @@
           c.maxMl = maxMl;
           updateGauge(c, payload.reservoir_ml, maxMl);
         }
+
+        // Mise à jour nom tireuse et nom boisson (changent quand on modifie la config dans l'admin)
+        if (payload.tireuse_bec !== undefined) c.nomTireuse.textContent = payload.tireuse_bec;
+        if (payload.liquid_label !== undefined) c.liquid.textContent = payload.liquid_label;
 
         // Mise à jour prix si envoyés
         if (payload.prix_litre !== undefined || payload.monnaie !== undefined) {

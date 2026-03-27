@@ -1,0 +1,19 @@
+[project]
+name = "tiheureuse"
+version = "0.1.0"
+description = "Système de gestion de tireuses à bière — serveur Django"
+requires-python = ">=3.11"
+
+dependencies = [
+    "django>=4.2",
+    "daphne>=4.0",          # Serveur ASGI (WebSocket requis — pas runserver)
+    "channels>=4.0",        # Django Channels (WebSocket temps réel)
+    "django-unfold>=0.46",  # Interface admin moderne
+    "whitenoise>=6.0",      # Compression et service des fichiers statiques
+    "requests>=2.31",       # Client HTTP vers le Pi
+    "pillow>=10.0",         # Traitement images (admin Unfold)
+    "python-dotenv>=1.0",   # Chargement .env local en développement
+]
+
+[tool.uv]
+dev-dependencies = []

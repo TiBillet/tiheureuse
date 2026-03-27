@@ -765,12 +765,17 @@ def api_rfid_register(request):
         },
     )
     if not created:
-        # Réinstall détectée (même UUID/MAC) : on met à jour le nom et les notes.
-        # On ne touche PAS à prix_litre_override ni à enabled pour ne pas écraser
-        # la configuration faite dans l'admin.
-        tireuse.nom_tireuse = nom_tireuse
-        tireuse.notes = note
-        tireuse.save(update_fields=["nom_tireuse", "notes"])
+        # Même UUID/MAC : redémarrage normal ou réinstall avec nouveau nom.
+        # On distingue les deux cas par le nom :
+        # - nom identique → simple redémarrage, on ne touche à rien (évite de désactiver la tireuse à chaque reboot)
+        # - nom différent → réinstall délibérée → on remet à zéro les états physiques
+        #   (l'admin doit re-valider le fût et ré-activer la tireuse)
+        if tireuse.nom_tireuse != nom_tireuse:
+            tireuse.nom_tireuse = nom_tireuse
+            tireuse.notes = note
+            tireuse.enabled = False
+            tireuse.fut_actif = None
+            tireuse.save(update_fields=["nom_tireuse", "notes", "enabled", "fut_actif"])
 
     return JsonResponse(
         {
