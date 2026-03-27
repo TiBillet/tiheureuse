@@ -19,7 +19,7 @@ ExecStartPre=/bin/sh -c 'setterm -blank 0 -powersave off -powerdown 0 </dev/tty1
                          mkdir -p /run/user/1000; chown 1000:1000 /run/user/1000; \
                          chvt 1 || true; sleep 0.2'
 # Log Xorg dédié verbeux
-# FAIT TODO: utiliser les route du dépot git par défault, pour pouvoir faire un git pull a chaque reboot pour les maj
+
 ExecStart=/usr/bin/xinit /home/sysop/xinitrc.bash -- /usr/lib/xorg/Xorg :0 -nolisten tcp -logverbose 6 -verbose 6 -logfile /home/sysop/Xorg.kiosk.log vt1 -keeptty
 Restart=on-failure
 RestartSec=8

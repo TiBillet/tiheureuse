@@ -3,6 +3,7 @@ import sys
 import time
 import os
 import signal
+import requests
 from dotenv import load_dotenv
 from ui.ui_server import run_server
 import threading
@@ -32,6 +33,35 @@ def debug_environment():
         print("ATTENTION: /dev/gpiochip0 introuvable!")
 # ---------------------------------------------
 
+def _attendre_serveur_ui(timeout_secondes=10):
+    """Attend que le serveur Flask UI réponde sur le port 5000.
+
+    Interroge http://localhost:5000 toutes les 0.3 secondes jusqu'à ce qu'il
+    réponde ou que le délai maximum soit dépassé. Non bloquant : en cas de
+    timeout on logue un avertissement et on continue quand même.
+    """
+    url = "http://localhost:5000"
+    delai_entre_tentatives = 0.3
+    temps_debut = time.time()
+
+    while time.time() - temps_debut < timeout_secondes:
+        try:
+            reponse = requests.get(url, timeout=1)
+            if reponse.status_code < 500:
+                duree = time.time() - temps_debut
+                logger.info(f"Serveur UI prêt en {duree:.1f}s (HTTP {reponse.status_code})")
+                return
+        except requests.exceptions.ConnectionError:
+            # Serveur pas encore démarré, on attend
+            pass
+        except Exception as erreur_inattendue:
+            logger.warning(f"Erreur inattendue lors du test du serveur UI : {erreur_inattendue}")
+            return
+        time.sleep(delai_entre_tentatives)
+
+    logger.warning(f"Serveur UI non disponible après {timeout_secondes}s — poursuite du démarrage")
+
+
 def main():
     """Point d'entrée du programme."""
     debug_environment()
@@ -46,6 +76,7 @@ def main():
     ui_thread.start()
     logger.info("Serveur UI démarré sur le port 5000")
     # TODO: Tester le port 5000 s'il répond
+    _attendre_serveur_ui(timeout_secondes=10)
 
     # Notification Systemd (Ready)
     if SYSTEMD_NOTIFY:

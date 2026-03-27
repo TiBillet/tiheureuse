@@ -193,7 +193,7 @@ class TireuseBec(models.Model):
         help_text="Débitmètre associé (détermine le facteur de calibration)",
     )
 
-    # TODO: Passer en entier avec modulo si besoin ?
+
     reservoir_ml = models.DecimalField(
         "Volume restant",
         max_digits=10,
