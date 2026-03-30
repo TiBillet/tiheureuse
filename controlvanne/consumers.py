@@ -73,7 +73,7 @@ class PanelConsumer(AsyncJsonWebsocketConsumer):
         return {
             "tireuse_bec": tb.nom_tireuse,
             "tireuse_bec_uuid": str(tb.uuid),
-            "liquid_label": tb.nom_boisson,
+            "liquid_label": tb.liquid_label,
             "present": bool(open_s and open_s.uid),
             "authorized": bool(open_s.authorized) if open_s else False,
             "vanne_ouverte": False,

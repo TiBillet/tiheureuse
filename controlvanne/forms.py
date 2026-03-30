@@ -34,7 +34,7 @@ class TireuseBecForm(forms.ModelForm):
     class Meta:
         model = TireuseBec
         fields = [
-            "nom_tireuse", "nom_boisson", "monnaie",
+            "nom_tireuse", "monnaie",
             "prix_litre_override",
             "seuil_mini_ml", "appliquer_reserve",
             "enabled", "notes",

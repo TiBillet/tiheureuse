@@ -130,10 +130,14 @@ class TireuseBec(models.Model):
     enabled = models.BooleanField("En service", default=True)
     notes = models.CharField(max_length=200, blank=True)
 
-    # TODO: a supprimer ? Remplacer par une foreignKey Produit qui comporte le nom et le prix/litre
-    nom_boisson = models.CharField(
-        max_length=100, default="Liquide", help_text="Nom affiché du liquide"
-    )
+    @property
+    def liquid_label(self) -> str:
+        """Nom du liquide affiché sur le kiosk.
+        Déduit du fût actif ; retourne 'Liquide' si aucun fût n'est assigné."""
+        if self.fut_actif:
+            return self.fut_actif.nom
+        return "Liquide"
+
     monnaie = models.CharField(
         max_length=20,
         default="patate",

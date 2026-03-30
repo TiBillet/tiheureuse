@@ -34,7 +34,7 @@ def snapshot_for_bec(tb: TireuseBec):
     return {
         "tireuse_bec": tb.nom_tireuse,
         "tireuse_bec_uuid": str(tb.uuid),
-        "liquid_label": tb.nom_boisson,
+        "liquid_label": tb.liquid_label,
         "present": bool(open_s and open_s.uid),
         "authorized": bool(open_s.authorized) if open_s else False,
         "vanne_ouverte": False,
@@ -66,11 +66,10 @@ def _tireusebec_pre_save(sender, instance: TireuseBec, **kwargs):
     except TireuseBec.DoesNotExist:
         return
 
-    # Si le fût actif change, mettre à jour nom_boisson et reservoir_ml sur l'instance
+    # Si le fût actif change, mettre à jour reservoir_ml sur l'instance
     if instance.fut_actif_id != instance._old_fut_id and instance.fut_actif_id is not None:
         try:
             fut = Fut.objects.get(pk=instance.fut_actif_id)
-            instance.nom_boisson = fut.nom
             instance.reservoir_ml = fut.volume_fut_l * 1000
         except Fut.DoesNotExist:
             pass

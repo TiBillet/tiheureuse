@@ -307,7 +307,7 @@ def api_rfid_authorize(request):
             started_at=timezone.now(),
             volume_start_ml=0.0,
             authorized=True,
-            liquid_label_snapshot=tireuse_bec.nom_boisson,
+            liquid_label_snapshot=tireuse_bec.liquid_label,
             label_snapshot=card.label,
             unit_label_snapshot=tireuse_bec.monnaie,
             unit_ml_snapshot=tireuse_bec.unit_ml,
@@ -322,7 +322,7 @@ def api_rfid_authorize(request):
         "authorized": True,  # Vert
         "vanne_ouverte": True,  # Vert
         "uid": uid,
-        "liquid_label": tireuse_bec.nom_boisson,
+        "liquid_label": tireuse_bec.liquid_label,
         "balance": str(card.balance),
         "reservoir_ml": float(tireuse_bec.reservoir_ml),
         "reservoir_max_ml": tireuse_bec.reservoir_max_ml,
@@ -347,7 +347,7 @@ def api_rfid_authorize(request):
             "authorized": True,
             "session_id": open_session.id,
             "balance": str(card.balance),
-            "liquid_label": tireuse_bec.nom_boisson,
+            "liquid_label": tireuse_bec.liquid_label,
             "unit_label": tireuse_bec.monnaie,
             "unit_ml": str(tireuse_bec.unit_ml),
             "flow_calibration_factor": flow_factor,

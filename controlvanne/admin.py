@@ -148,7 +148,6 @@ class TireuseBecAdmin(ModelAdmin):
         "name_with_uuid",
         "fut_actif",
         "debimetre",
-        "nom_boisson",
         "monnaie",
         "prix_effectif_display",
         "col_25cl",
@@ -163,11 +162,10 @@ class TireuseBecAdmin(ModelAdmin):
     list_editable = (
         "fut_actif",
         "debimetre",
-        "nom_boisson",
         "monnaie",
         "enabled",
     )
-    search_fields = ("nom_tireuse", "nom_boisson", "notes")
+    search_fields = ("nom_tireuse", "notes")
 
     @admin.display(description="Name")
     def name_with_uuid(self, obj):
