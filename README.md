@@ -110,8 +110,8 @@ Le script est interactif et ne demande que l'essentiel :
 
 ### Prérequis
 
-- Python 3.9+
-- Les dépendances listées dans `vanneweb/settings.py`
+- Python 3.11+
+- [uv](https://docs.astral.sh/uv/getting-started/installation/) (gestionnaire d'environnements et de dépendances)
 
 ### Lancer le serveur
 
@@ -120,18 +120,17 @@ Le script est interactif et ne demande que l'essentiel :
 git clone https://github.com/TiBillet/tiheureuse.git
 cd tiheureuse
 
-# Environnement virtuel
-python3 -m venv venv && source venv/bin/activate
-pip install -r requirements.txt   # ou pip install -e .
+# Créer l'environnement virtuel et installer les dépendances
+uv sync
 
 # Migrations
-python manage.py migrate
+uv run python manage.py migrate
 
 # Créer un superutilisateur
-python manage.py createsuperuser
+uv run python manage.py createsuperuser
 
 # Lancer avec Daphne (WebSocket requis)
-daphne -b 0.0.0.0 -p 8000 vanneweb.asgi:application
+uv run daphne -b 0.0.0.0 -p 8000 vanneweb.asgi:application
 ```
 
 > L'interface d'administration est accessible sur `http://<ip>:8000/admin/`
@@ -217,13 +216,16 @@ source /home/sysop/tibeer/.venv/bin/activate
 
 ```bash
 # Lancer le serveur (développement)
-daphne -b 0.0.0.0 -p 8000 vanneweb.asgi:application
+uv run daphne -b 0.0.0.0 -p 8000 vanneweb.asgi:application
 
 # Appliquer les migrations
-python manage.py migrate
+uv run python manage.py migrate
 
 # Reconstruire les fichiers statiques
-python manage.py collectstatic --no-input
+uv run python manage.py collectstatic --no-input
+
+# Ajouter une dépendance
+uv add <package>
 ```
 
 ---
