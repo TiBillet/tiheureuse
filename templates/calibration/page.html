@@ -83,17 +83,27 @@
               <td class="text-muted small">{{ session.label_snapshot|default:session.uid }}</td>
               <td><strong>{{ session.volume_delta_ml|floatformat:0 }} ml</strong></td>
               <td>
-                <form hx-post="{% url 'calibration_soumettre' uuid=tireuse.uuid session_id=session.pk %}"
-                      hx-target="#mesure-{{ session.pk }}"
-                      hx-swap="outerHTML"
-                      class="d-flex gap-2 align-items-center">
-                  {% csrf_token %}
-                  <input type="number" name="volume_reel_ml"
-                         min="1" max="2000" step="1"
-                         placeholder="ex : 487"
-                         class="form-control form-control-sm" style="width:110px" required>
-                  <button type="submit" class="btn btn-sm btn-primary">Calculer</button>
-                </form>
+                <div class="d-flex gap-2 align-items-center flex-wrap">
+                  <form hx-post="{% url 'calibration_soumettre' uuid=tireuse.uuid session_id=session.pk %}"
+                        hx-target="#mesure-{{ session.pk }}"
+                        hx-swap="outerHTML"
+                        class="d-flex gap-2 align-items-center">
+                    {% csrf_token %}
+                    <input type="number" name="volume_reel_ml"
+                           min="1" max="2000" step="1"
+                           placeholder="ex : 487"
+                           class="form-control form-control-sm" style="width:110px" required>
+                    <button type="submit" class="btn btn-sm btn-primary">Calculer</button>
+                  </form>
+                  <form hx-post="{% url 'calibration_supprimer' uuid=tireuse.uuid session_id=session.pk %}"
+                        hx-target="#mesure-{{ session.pk }}"
+                        hx-swap="outerHTML"
+                        hx-confirm="Supprimer cette mesure ?"
+                        class="d-inline">
+                    {% csrf_token %}
+                    <button type="submit" class="btn btn-sm btn-outline-danger">✕</button>
+                  </form>
+                </div>
               </td>
             </tr>
             {% endfor %}

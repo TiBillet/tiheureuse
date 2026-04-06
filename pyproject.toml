@@ -15,5 +15,3 @@ dependencies = [
     "python-dotenv>=1.0",   # Chargement .env local en développement
 ]
 
-[tool.uv]
-dev-dependencies = []

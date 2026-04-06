@@ -22,6 +22,11 @@ urlpatterns = [
         name="calibration_soumettre",
     ),
     path(
+        "calibration/<uuid:uuid>/mesure/<int:session_id>/supprimer/",
+        calibration_views.calibration_supprimer,
+        name="calibration_supprimer",
+    ),
+    path(
         "calibration/<uuid:uuid>/appliquer/",
         calibration_views.calibration_appliquer,
         name="calibration_appliquer",

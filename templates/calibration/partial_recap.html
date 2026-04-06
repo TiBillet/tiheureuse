@@ -1,5 +1,6 @@
 {# Fragment HTMX — récap de toutes les mesures calibrées + bouton Appliquer #}
 {# Inclus dans page.html ET mis à jour hors-bande depuis partial_mesure.html #}
+{% load l10n %}
 
 {% if mesures_recap %}
 <div class="card mb-4">
@@ -56,7 +57,7 @@
               hx-target="#zone-confirmation"
               hx-swap="innerHTML">
           {% csrf_token %}
-          <input type="hidden" name="facteur_moyen" value="{{ facteur_moyen }}">
+          <input type="hidden" name="facteur_moyen" value="{{ facteur_moyen|unlocalize }}">
           <button type="submit" class="btn btn-success">✓ Appliquer ce facteur</button>
         </form>
       </div>

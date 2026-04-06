@@ -11,7 +11,7 @@
   <strong>{{ facteur_applique }}</strong>
   <span class="text-muted small">Hz·L⁻¹·min⁻¹</span>
 </div>
-<a href="{% url 'calibration_page' uuid=tireuse.uuid %}"
+<a href="{% url 'calibration_page' uuid=tireuse.uuid %}?depuis={{ maintenant }}"
    class="btn btn-outline-primary btn-sm">
   Faire une nouvelle série de mesures
 </a>

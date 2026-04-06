@@ -1,8 +1,10 @@
 from decimal import Decimal, InvalidOperation
+from datetime import datetime
 
 from django.contrib.auth.decorators import user_passes_test
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
+from django.utils import timezone
 from django.views.decorators.http import require_GET, require_POST
 
 # La calibration modifie le facteur du débitmètre (impact direct sur la facturation).
@@ -84,14 +86,30 @@ def calibration_page(request, uuid):
     """
     tireuse = get_object_or_404(TireuseBec, uuid=uuid)
 
-    # Toutes les sessions maintenance terminées avec du liquide versé
+    # Optionnel : ?depuis=<ISO timestamp> passé par le lien "nouvelle série"
+    # Si présent, on n'affiche que les sessions postérieures à ce moment
+    depuis = None
+    depuis_str = request.GET.get("depuis")
+    if depuis_str:
+        try:
+            depuis = datetime.fromisoformat(depuis_str)
+            if timezone.is_naive(depuis):
+                depuis = timezone.make_aware(depuis)
+        except (ValueError, TypeError):
+            depuis = None
+
+    # Filtre de base : sessions maintenance terminées avec du liquide versé
+    filtre_base = dict(
+        tireuse_bec=tireuse,
+        is_maintenance=True,
+        ended_at__isnull=False,
+        volume_delta_ml__gt=0,
+    )
+    if depuis:
+        filtre_base["started_at__gte"] = depuis
+
     sessions_terminees = list(
-        RfidSession.objects.filter(
-            tireuse_bec=tireuse,
-            is_maintenance=True,
-            ended_at__isnull=False,
-            volume_delta_ml__gt=0,
-        ).order_by("-started_at")[:20]
+        RfidSession.objects.filter(**filtre_base).order_by("-started_at")[:20]
     )
 
     # Séparer : en attente de saisie vs déjà calibrées
@@ -182,6 +200,27 @@ def calibration_soumettre(request, uuid, session_id):
 
 @superuser_required
 @require_POST
+def calibration_supprimer(request, uuid, session_id):
+    """
+    Supprime une session de maintenance en attente de saisie.
+    Seules les sessions sans volume_reel_ml peuvent être supprimées —
+    les mesures déjà calibrées sont conservées pour l'historique.
+    Retourne un fragment vide : HTMX remplace la ligne par rien.
+    """
+    tireuse = get_object_or_404(TireuseBec, uuid=uuid)
+    session = get_object_or_404(
+        RfidSession,
+        pk=session_id,
+        tireuse_bec=tireuse,
+        is_maintenance=True,
+        volume_reel_ml__isnull=True,  # Seulement les mesures non encore saisies
+    )
+    session.delete()
+    return render(request, "calibration/partial_vide.html")
+
+
+@superuser_required
+@require_POST
 def calibration_appliquer(request, uuid):
     """
     Applique le facteur moyen calculé au débitmètre associé à la tireuse.
@@ -194,7 +233,7 @@ def calibration_appliquer(request, uuid):
     facteur_applique = None
 
     try:
-        facteur_applique = round(float(request.POST.get("facteur_moyen", "0")), 4)
+        facteur_applique = round(float(request.POST.get("facteur_moyen", "0").replace(",", ".")), 4)
         if facteur_applique <= 0:
             raise ValueError("facteur nul")
     except (ValueError, TypeError):
@@ -214,4 +253,5 @@ def calibration_appliquer(request, uuid):
         "facteur_applique": facteur_applique,
         "facteur_ancien": facteur_ancien,
         "erreur": erreur,
+        "maintenant": timezone.now().isoformat(),
     })

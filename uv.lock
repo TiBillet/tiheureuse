@@ -723,9 +723,6 @@ requires-dist = [
     { name = "whitenoise", specifier = ">=6.0" },
 ]
 
-[package.metadata.requires-dev]
-dev = []
-
 [[package]]
 name = "twisted"
 version = "25.5.0"
